@@ -496,13 +496,37 @@
     }
 
     function resetGoalKick(defendingTeam) {
+        // FIX: this used to snap the ball straight to the GK piece's
+        // CURRENT position, wherever that happened to be on the pitch -
+        // if the keeper had wandered upfield, a shot that missed the post
+        // would visually "find" them out there instead of behaving like a
+        // normal goal-kick restart. Now the ball always resets to the
+        // actual goal line, and the keeper only takes possession if
+        // they're actually close enough to their own goal for that to
+        // make sense; otherwise it's a loose ball up for grabs.
+        let goalX, goalY;
+        if (isPortrait) {
+            goalY = defendingTeam === TEAM_USER ? canvas.height - GoalWidth - 10 : GoalWidth + 10;
+            goalX = canvas.width / 2;
+        } else {
+            goalX = defendingTeam === TEAM_USER ? GoalWidth + 10 : canvas.width - GoalWidth - 10;
+            goalY = canvas.height / 2;
+        }
+
+        ball.x = goalX;
+        ball.y = goalY;
+        ball.carrier = null;
+
         const targetGK = pieces.find(p => p.team === defendingTeam && p.role === 'GK');
         if (targetGK) {
-            ball.x = targetGK.x;
-            ball.y = targetGK.y;
-            ball.carrier = targetGK;
-        } else {
-            resetBallToCenter();
+            const distToGoal = Math.hypot(targetGK.x - goalX, targetGK.y - goalY);
+            if (distToGoal < 150) {
+                ball.carrier = targetGK;
+            }
+        }
+
+        if (!ball.carrier) {
+            checkBallPossession();
         }
     }
 
@@ -838,6 +862,7 @@
         }
 
         let blocked = false;
+        let goalIsGuarded = false;
         if (enemyGK) {
             const gkBlockDist = distToSegment(
                 { x: enemyGK.x, y: enemyGK.y },
@@ -851,6 +876,15 @@
                 const blockChance = 0.12 + proximity * proximity * 0.63;
                 if (Math.random() < blockChance) blocked = true;
             }
+
+            // NEW: separately track whether the keeper is even in a
+            // position to threaten this goal at all (near their own goal
+            // mouth), regardless of whether they happen to sit exactly on
+            // this particular shot's line. This is what "guards" the net.
+            const goalMouthX = isPortrait ? targetX : (shooter.team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth);
+            const goalMouthY = isPortrait ? (shooter.team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth) : targetY;
+            const gkDistFromGoal = Math.hypot(enemyGK.x - goalMouthX, enemyGK.y - goalMouthY);
+            goalIsGuarded = gkDistFromGoal < 220;
         }
 
         if (blocked) {
@@ -862,7 +896,19 @@
             });
         } else {
             const shotDist = Math.hypot(targetX - shooter.x, targetY - shooter.y);
-            const successChance = Math.max(0.35, 1 - (shotDist / (ShootRange * 1.1)));
+
+            // FIX: successChance used to be based purely on shot distance,
+            // completely ignoring the keeper's position. That meant even a
+            // wide-open net could "miss" the majority of the time from
+            // range, sending the ball right back toward the goal where the
+            // keeper often scooped it up - looking exactly like an empty
+            // net "automatically" finding the keeper. Now, if the keeper
+            // isn't actually guarding the goal, the shot is almost always
+            // a goal; distance only matters when there's a keeper there to
+            // realistically make it harder.
+            const successChance = goalIsGuarded
+                ? Math.max(0.35, 1 - (shotDist / (ShootRange * 1.1)))
+                : Math.max(0.9, 1 - (shotDist / (ShootRange * 2.5)));
 
             if (Math.random() < successChance) {
                 animateBall(targetX, targetY, () => {
