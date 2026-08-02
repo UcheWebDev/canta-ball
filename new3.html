@@ -9,17 +9,7 @@
             box-sizing: border-box;
             user-select: none;
             -webkit-user-select: none;
-        }
-
-        html, body {
-            /* FIX: touch-action:none used to be set on * (every element),
-               which disables scrolling on the whole page, not just the
-               game canvas. That's why smaller phones had no way to reach
-               content that ran below the fold. Scrolling is now allowed
-               here; touch-action:none is applied ONLY to the canvas and
-               its container further down, where we actually need to stop
-               touches from panning/zooming the page during gameplay. */
-            touch-action: pan-y;
+            touch-action: none;
         }
 
         body {
@@ -28,12 +18,11 @@
             background-color: #1a0d00;
             display: flex;
             justify-content: center;
-            align-items: flex-start;
+            align-items: center;
             min-height: 100vh;
             color: #fff;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            overflow-y: auto;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         #table-frame {

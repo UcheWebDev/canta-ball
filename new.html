@@ -9,17 +9,7 @@
             box-sizing: border-box;
             user-select: none;
             -webkit-user-select: none;
-        }
-
-        html, body {
-            /* FIX: touch-action:none used to be set on * (every element),
-               which disables scrolling on the whole page, not just the
-               game canvas. That's why smaller phones had no way to reach
-               content that ran below the fold. Scrolling is now allowed
-               here; touch-action:none is applied ONLY to the canvas and
-               its container further down, where we actually need to stop
-               touches from panning/zooming the page during gameplay. */
-            touch-action: pan-y;
+            touch-action: none;
         }
 
         body {
@@ -28,12 +18,11 @@
             background-color: #1a0d00;
             display: flex;
             justify-content: center;
-            align-items: flex-start;
+            align-items: center;
             min-height: 100vh;
             color: #fff;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            overflow-y: auto;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         #table-frame {
@@ -107,18 +96,14 @@
 
         canvas {
             display: block;
+            width: 100%;
+            height: auto;
+            max-height: 65vh;
+            object-fit: contain;
             background-color: #1e6b27;
             background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><rect fill="%231e6b27" width="8" height="8"/><rect fill="%23185a20" width="2" height="2" x="0" y="0"/><rect fill="%23185a20" width="2" height="2" x="4" y="4"/></svg>');
             cursor: pointer;
             touch-action: none;
-            /* width/height are set explicitly in JS (resizeCanvasDisplay)
-               so the element box always matches the internal drawing-buffer
-               aspect ratio exactly. Do NOT reintroduce width:100%/height:auto/
-               max-height/object-fit here - that combination lets the box
-               aspect ratio drift from the buffer aspect ratio, which both
-               letterboxes the render (pitch lines look "not full width")
-               and breaks touch coordinate mapping (rect no longer matches
-               the visible content) on portrait/mobile screens. */
         }
 
         #action-bar {
@@ -259,6 +244,9 @@
                 padding: 6px;
                 border-radius: 8px;
             }
+            canvas {
+                max-height: 60vh;
+            }
         }
     </style>
 </head>
@@ -291,7 +279,7 @@
             <button id="btn-move" class="action-btn" onclick="setAction('MOVE')">MOVE</button>
             <button id="btn-pass" class="action-btn" onclick="setAction('PASS')">PASS</button>
             <button id="btn-shoot" class="action-btn" onclick="setAction('SHOOT')">SHOOT</button>
-
+            
             <div id="target-selector">
                 <button id="target-left" class="target-btn" onclick="setTargetZone('LEFT')">LEFT</button>
                 <button id="target-center" class="target-btn active-target" onclick="setTargetZone('CENTER')">CENTER</button>
@@ -303,7 +291,6 @@
 <script>
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-    const canvasContainer = document.getElementById('canvas-container');
 
     const turnIndicator = document.getElementById('turn-indicator');
     const scoreP1Display = document.getElementById('score-p1');
@@ -323,7 +310,7 @@
 
     const WIN_SCORE = 3;
     const PieceRadius = 16;
-    const TouchHitboxRadius = 32; // Expanded hit area for mobile touches
+    const TouchHitboxRadius = 32;
     const BallRadius = 7;
     const MoveRadius = 140;
     const ShootRange = 360;
@@ -358,38 +345,6 @@
         }
     }
 
-    // FIX: previously the canvas relied on CSS `width:100%; height:auto;
-    // max-height:65vh; object-fit:contain;`. When the height:auto value
-    // (derived from the internal buffer's aspect ratio) exceeded the
-    // max-height cap, the browser kept width at 100% but clamped height to
-    // max-height - breaking the box's aspect ratio. object-fit:contain then
-    // letterboxed the actual rendered pitch inside that mismatched box,
-    // which is why the halfway line (drawn edge-to-edge in canvas
-    // coordinates) visually appeared inset from the container edges on
-    // portrait/mobile screens, and why touches landed on the wrong pieces
-    // (getBoundingClientRect returns the outer box, not the letterboxed
-    // visible area, so the tap-to-coordinate math was off).
-    //
-    // Fix: compute the exact display size in JS so the CSS box always
-    // matches the internal buffer's aspect ratio 1:1. No letterboxing is
-    // possible, and rect-based touch mapping stays accurate.
-    function resizeCanvasDisplay() {
-        const availW = canvasContainer.clientWidth || window.innerWidth;
-        const availH = window.innerHeight * 0.65;
-        const aspect = canvas.width / canvas.height;
-
-        let dispW = availW;
-        let dispH = dispW / aspect;
-
-        if (dispH > availH) {
-            dispH = availH;
-            dispW = dispH * aspect;
-        }
-
-        canvas.style.width = Math.round(dispW) + 'px';
-        canvas.style.height = Math.round(dispH) + 'px';
-    }
-
     class Piece {
         constructor(id, team, role, x, y) {
             this.id = id;
@@ -418,13 +373,13 @@
 
             ctx.beginPath();
             ctx.arc(this.x, this.y, PieceRadius, 0, Math.PI * 2);
-
-            const colorMain = this.team === TEAM_USER ?
-                (this.role === 'GK' ? '#ff9900' : '#d32f2f') :
+            
+            const colorMain = this.team === TEAM_USER ? 
+                (this.role === 'GK' ? '#ff9900' : '#d32f2f') : 
                 (this.role === 'GK' ? '#00b894' : '#1976d2');
-
-            const colorLight = this.team === TEAM_USER ?
-                (this.role === 'GK' ? '#ffcc00' : '#ef5350') :
+            
+            const colorLight = this.team === TEAM_USER ? 
+                (this.role === 'GK' ? '#ffcc00' : '#ef5350') : 
                 (this.role === 'GK' ? '#55efc4' : '#42a5f5');
 
             const grad = ctx.createRadialGradient(this.x - 4, this.y - 4, 2, this.x, this.y, PieceRadius);
@@ -451,7 +406,6 @@
 
     function initTeams() {
         updateCanvasOrientation();
-        resizeCanvasDisplay();
         const midX = canvas.width / 2;
         const midY = canvas.height / 2;
 
@@ -523,7 +477,7 @@
 
     function setAction(action) {
         if (currentTurn !== TEAM_USER || !selectedPiece || isAnimating) return;
-
+        
         if (action === 'SHOOT') {
             if (ball.carrier !== selectedPiece) return;
             const enemyGoalX = isPortrait ? canvas.width / 2 : canvas.width;
@@ -547,7 +501,7 @@
     function setTargetZone(zone) {
         if (currentTurn !== TEAM_USER || isAnimating) return;
         targetZone = zone;
-
+        
         targetLeft.classList.remove('active-target');
         targetCenter.classList.remove('active-target');
         targetRight.classList.remove('active-target');
@@ -635,11 +589,6 @@
         const clickX = pos.x;
         const clickY = pos.y;
 
-        // FIX (was missing): if we're already in PASS mode with the ball,
-        // tapping a teammate should complete the pass to them - this must
-        // be checked BEFORE generic piece (re)selection below, otherwise
-        // tapping any teammate (the only way to target a pass) just
-        // reselects that teammate instead of passing to them.
         if (selectedAction === 'PASS' && selectedPiece && ball.carrier === selectedPiece) {
             const teammates = pieces.filter(p => p.team === TEAM_USER && p !== selectedPiece);
             let passTarget = null;
@@ -659,21 +608,15 @@
             }
         }
 
-        // 1. Check direct piece selection across all user pieces
         let clickedPiece = pieces.find(p => p.team === TEAM_USER && Math.hypot(p.x - clickX, p.y - clickY) <= TouchHitboxRadius);
-
+        
         if (clickedPiece) {
             selectedPiece = clickedPiece;
-            // FIX: default to MOVE for any selected piece (including the ball
-            // carrier). Previously this defaulted to PASS for the carrier,
-            // which silently blocked dribbling/movement unless the player
-            // remembered to tap the MOVE button first.
             selectedAction = 'MOVE';
             updateActionButtons();
             return;
         }
 
-        // 2. Handle Action Resolution if a piece is already selected
         if (selectedPiece) {
             if (selectedAction === 'MOVE') {
                 handleMoveAction(selectedPiece, clickX, clickY);
@@ -685,7 +628,6 @@
         }
     }
 
-    // Touch and Event Listener setups
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
         pointerPos = getCanvasCoordinates(e);
@@ -720,12 +662,12 @@
         const dx = destX - piece.x;
         const dy = destY - piece.y;
         const distance = Math.hypot(dx, dy);
-
+        
         if (distance === 0) return { finalX: piece.x, finalY: piece.y, hitPiece: null };
 
         const dirX = dx / distance;
         const dirY = dy / distance;
-        const minSpace = PieceRadius * 2 + 2; // Buffer space to prevent physical overlapping stickiness
+        const minSpace = PieceRadius * 2 + 2;
 
         let closestHitDist = distance;
         let hitPiece = null;
@@ -840,8 +782,8 @@
         let blocked = false;
         if (enemyGK) {
             const gkBlockDist = distToSegment(
-                { x: enemyGK.x, y: enemyGK.y },
-                { x: shooter.x, y: shooter.y },
+                { x: enemyGK.x, y: enemyGK.y }, 
+                { x: shooter.x, y: shooter.y }, 
                 { x: targetX, y: targetY }
             );
 
@@ -875,7 +817,7 @@
                 const missOffset = (Math.random() > 0.5 ? 1 : -1) * (25 + Math.random() * 20);
                 const missX = isPortrait ? targetX + missOffset : targetX;
                 const missY = isPortrait ? targetY : targetY + missOffset;
-
+                
                 animateBall(missX, missY, () => {
                     showLog("Shot Missed - Goal Kick!");
                     resetGoalKick(enemyTeam);
@@ -1002,6 +944,8 @@
 
         if (isPortrait) {
             const GY = canvas.width / 2 - GoalHeight / 2;
+            
+            // FIX: Center line for portrait orientation (vertical pitch layout)
             ctx.beginPath();
             ctx.moveTo(0, canvas.height / 2);
             ctx.lineTo(canvas.width, canvas.height / 2);
@@ -1024,6 +968,8 @@
             ctx.strokeRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
         } else {
             const GY = canvas.height / 2 - GoalHeight / 2;
+            
+            // Center line for landscape orientation
             ctx.beginPath();
             ctx.moveTo(canvas.width / 2, 0);
             ctx.lineTo(canvas.width / 2, canvas.height);
@@ -1059,7 +1005,6 @@
             ctx.setLineDash([6, 6]);
             ctx.stroke();
 
-            // Draw current active dragging / target line
             if (pointerPos) {
                 const moveRes = resolveMovementWithCollisions(selectedPiece, pointerPos.x, pointerPos.y);
                 ctx.beginPath();
@@ -1107,7 +1052,6 @@
                 }
                 ctx.stroke();
 
-                // Draw Receiver Target Touch Circle
                 ctx.beginPath();
                 ctx.arc(teammate.x, teammate.y, PieceRadius + 8, 0, Math.PI * 2);
                 ctx.strokeStyle = isBlocked ? '#ff4d4d' : '#ffcc00';
@@ -1119,36 +1063,18 @@
         }
     }
 
-    // NEW: mirrors drawPassIndicators() but for the SHOOT action - this was
-    // previously entirely missing, so selecting SHOOT gave no visual line
-    // to the target zone the way PASS did to teammates. Reuses the exact
-    // same target-position math as handleShootAction() and the same
-    // goalkeeper block-risk distance check, so the preview accurately
-    // reflects what will happen when the shot is taken.
-    function drawShootIndicator() {
+    // FIX: ADDED MISSING SHOOT INDICATORS RENDERER
+    function drawShootIndicators() {
         if (currentTurn === TEAM_USER && selectedPiece && selectedAction === 'SHOOT' && ball.carrier === selectedPiece && !isAnimating) {
-            const enemyTeam = selectedPiece.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
-            const enemyGK = pieces.find(p => p.team === enemyTeam && p.role === 'GK');
-
-            const GY_VAL = isPortrait ? canvas.width / 2 - GoalHeight / 2 : canvas.height / 2 - GoalHeight / 2;
             let targetX, targetY;
+            const GY_VAL = isPortrait ? canvas.width / 2 - GoalHeight / 2 : canvas.height / 2 - GoalHeight / 2;
 
             if (isPortrait) {
-                targetY = selectedPiece.team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth;
+                targetY = GoalWidth;
                 targetX = targetZone === 'LEFT' ? GY_VAL + 25 : (targetZone === 'RIGHT' ? GY_VAL + GoalHeight - 25 : canvas.width / 2);
             } else {
-                targetX = selectedPiece.team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth;
+                targetX = canvas.width - GoalWidth;
                 targetY = targetZone === 'LEFT' ? GY_VAL + 25 : (targetZone === 'RIGHT' ? GY_VAL + GoalHeight - 25 : canvas.height / 2);
-            }
-
-            let isBlocked = false;
-            if (enemyGK) {
-                const gkBlockDist = distToSegment(
-                    { x: enemyGK.x, y: enemyGK.y },
-                    { x: selectedPiece.x, y: selectedPiece.y },
-                    { x: targetX, y: targetY }
-                );
-                if (gkBlockDist < PieceRadius + 30) isBlocked = true;
             }
 
             ctx.save();
@@ -1156,20 +1082,14 @@
             ctx.moveTo(selectedPiece.x, selectedPiece.y);
             ctx.lineTo(targetX, targetY);
             ctx.lineWidth = 3;
-
-            if (isBlocked) {
-                ctx.strokeStyle = 'rgba(255, 77, 77, 0.7)';
-                ctx.setLineDash([4, 6]);
-            } else {
-                ctx.strokeStyle = 'rgba(255, 0, 85, 0.85)';
-                ctx.setLineDash([6, 4]);
-            }
+            ctx.strokeStyle = '#ff0055';
+            ctx.setLineDash([6, 4]);
             ctx.stroke();
 
-            // Draw target zone marker in the goal
+            // Draw Target Indicator Box on Goal
             ctx.beginPath();
-            ctx.arc(targetX, targetY, 10, 0, Math.PI * 2);
-            ctx.strokeStyle = isBlocked ? '#ff4d4d' : '#ff0055';
+            ctx.arc(targetX, targetY, 12, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ff0055';
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
             ctx.stroke();
@@ -1201,7 +1121,7 @@
         drawPitch();
         drawMovementRadius();
         drawPassIndicators();
-        drawShootIndicator();
+        drawShootIndicators(); // Called shooting line drawer
         pieces.forEach(p => p.draw());
         drawBall();
 
@@ -1253,8 +1173,6 @@
         updateCanvasOrientation();
         if (prevPortrait !== isPortrait) {
             initTeams();
-        } else {
-            resizeCanvasDisplay();
         }
     });
 
