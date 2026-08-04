@@ -1,0 +1,2093 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CantaBall Arena - Mobile Adaptive</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html, body {
+            /* FIX: touch-action:none used to be set on * (every element),
+               which disables scrolling on the whole page, not just the
+               game canvas. That's why smaller phones had no way to reach
+               content that ran below the fold. Scrolling is now allowed
+               here; touch-action:none is applied ONLY to the canvas and
+               its container further down, where we actually need to stop
+               touches from panning/zooming the page during gameplay. */
+            touch-action: pan-y;
+        }
+
+        body {
+            margin: 0;
+            padding: 8px;
+            background-color: #1a0d00;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        #table-frame {
+            width: 100%;
+            max-width: 1000px;
+            padding: 10px;
+            background-color: #5d3a1a;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect fill="%235d3a1a" width="100" height="100"/><path d="M0 50 Q 25 40, 50 50 T 100 50" stroke="%234a2f15" fill="none" stroke-width="2"/></svg>');
+            border-radius: 12px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.8);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #scoreboard {
+            width: 100%;
+            height: auto;
+            min-height: 44px;
+            background-color: #111;
+            border: 2px solid #333;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 12px;
+            margin-bottom: 8px;
+            box-shadow: inset 0 0 10px #000;
+        }
+
+        .score-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .score-val {
+            color: #ffcc00;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 22px;
+            text-shadow: 0 0 8px #ffcc00;
+        }
+
+        #turn-indicator {
+            font-size: 11px;
+            color: #ff4d4d;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: #222;
+            padding: 4px 10px;
+            border-radius: 15px;
+            border: 1px solid #ff4d4d;
+            text-align: center;
+        }
+
+        #canvas-container {
+            position: relative;
+            width: 100%;
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            touch-action: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            display: block;
+            background-color: #1e6b27;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><rect fill="%231e6b27" width="8" height="8"/><rect fill="%23185a20" width="2" height="2" x="0" y="0"/><rect fill="%23185a20" width="2" height="2" x="4" y="4"/></svg>');
+            cursor: pointer;
+            touch-action: none;
+            /* width/height are set explicitly in JS (resizeCanvasDisplay)
+               so the element box always matches the internal drawing-buffer
+               aspect ratio exactly. Do NOT reintroduce width:100%/height:auto/
+               max-height/object-fit here - that combination lets the box
+               aspect ratio drift from the buffer aspect ratio, which both
+               letterboxes the render (pitch lines look "not full width")
+               and breaks touch coordinate mapping (rect no longer matches
+               the visible content) on portrait/mobile screens. */
+        }
+
+        #action-bar {
+            width: 100%;
+            margin-top: 8px;
+            background-color: #111;
+            border: 2px solid #333;
+            border-radius: 6px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            gap: 6px;
+        }
+
+        .action-btn, .target-btn {
+            flex: 1 1 28%;
+            min-height: 44px;
+            padding: 8px 0;
+            font-size: 13px;
+            font-weight: bold;
+            color: #888;
+            background-color: #222;
+            border: 2px solid #444;
+            border-radius: 6px;
+            cursor: not-allowed;
+            transition: all 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .action-btn.active {
+            color: #111;
+            background-color: #ffcc00;
+            border-color: #ffe600;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(255, 204, 0, 0.4);
+        }
+
+        .action-btn.selected {
+            outline: 2px solid #ff0055;
+            background-color: #ff0055;
+            color: #fff;
+        }
+
+        #btn-replay.active {
+            color: #fff;
+            background-color: #333;
+            border-color: #ff0055;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(255, 0, 85, 0.3);
+        }
+
+        #target-selector {
+            display: none;
+            width: 100%;
+            align-items: center;
+            gap: 6px;
+            background: #1a1a1a;
+            padding: 6px;
+            border-radius: 6px;
+            border: 1px solid #333;
+            margin-top: 4px;
+        }
+
+        .target-btn {
+            flex: 1;
+            cursor: pointer;
+            font-size: 11px;
+            padding: 8px 0;
+            color: #ccc;
+            border-color: #555;
+        }
+
+        .target-btn.active-target {
+            background-color: #ff0055;
+            border-color: #ff0055;
+            color: #fff;
+            box-shadow: 0 0 8px rgba(255, 0, 85, 0.6);
+        }
+
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            backdrop-filter: blur(3px);
+            padding: 15px;
+            text-align: center;
+        }
+
+        #overlay h1 {
+            font-size: 36px;
+            color: #ffcc00;
+            margin: 0 0 8px 0;
+            text-shadow: 0 0 15px #ffcc00;
+        }
+
+        #overlay p {
+            font-size: 16px;
+            color: #ccc;
+            margin: 0 0 16px 0;
+        }
+
+        #overlay button {
+            padding: 10px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            background: #ffcc00;
+            color: #000;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(255, 204, 0, 0.4);
+        }
+
+        #log-text {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.85);
+            color: #ffcc00;
+            padding: 6px 14px;
+            border-radius: 12px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            border: 1px solid #555;
+            white-space: nowrap;
+            z-index: 5;
+        }
+
+        #replay-banner {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.85);
+            color: #ff0055;
+            padding: 6px 16px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            pointer-events: none;
+            display: none;
+            border: 1px solid #ff0055;
+            box-shadow: 0 0 10px rgba(255, 0, 85, 0.5);
+            z-index: 6;
+            white-space: nowrap;
+        }
+
+        @media screen and (max-width: 600px) {
+            body {
+                padding: 4px;
+            }
+            #table-frame {
+                padding: 6px;
+                border-radius: 8px;
+            }
+        }
+
+        /* ---------- LOBBY ---------- */
+        #lobby-frame {
+            width: 100%;
+            max-width: 480px;
+            padding: 28px 22px;
+            background-color: #5d3a1a;
+            border-radius: 12px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.8);
+            text-align: center;
+        }
+
+        #lobby-frame h1 {
+            color: #ffcc00;
+            text-shadow: 0 0 15px #ffcc00;
+            font-size: 28px;
+            margin: 0 0 4px 0;
+        }
+
+        #lobby-frame .subtitle {
+            color: #ccc;
+            font-size: 13px;
+            margin: 0 0 24px 0;
+        }
+
+        .lobby-btn {
+            display: block;
+            width: 100%;
+            min-height: 52px;
+            margin-bottom: 12px;
+            font-size: 15px;
+            font-weight: bold;
+            color: #111;
+            background-color: #ffcc00;
+            border: 2px solid #ffe600;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(255, 204, 0, 0.3);
+        }
+
+        .lobby-btn.secondary {
+            background-color: #222;
+            color: #ffcc00;
+            border-color: #444;
+        }
+
+        .lobby-panel {
+            display: none;
+            margin-top: 10px;
+            padding: 16px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            text-align: left;
+        }
+
+        .lobby-panel.visible { display: block; }
+
+        .lobby-panel label {
+            display: block;
+            font-size: 11px;
+            color: #999;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .lobby-panel input {
+            width: 100%;
+            padding: 10px;
+            font-size: 18px;
+            letter-spacing: 3px;
+            text-align: center;
+            text-transform: uppercase;
+            background: #111;
+            border: 2px solid #444;
+            border-radius: 6px;
+            color: #ffcc00;
+            margin-bottom: 10px;
+        }
+
+        .lobby-status {
+            margin-top: 14px;
+            font-size: 13px;
+            color: #ffcc00;
+            min-height: 18px;
+        }
+
+        .room-code-display {
+            font-family: 'Courier New', monospace;
+            font-size: 28px;
+            letter-spacing: 6px;
+            color: #ffcc00;
+            background: #111;
+            border: 2px dashed #555;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 12px 0;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #444;
+            border-top-color: #ffcc00;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .cancel-link {
+            display: inline-block;
+            margin-top: 14px;
+            color: #ff4d4d;
+            font-size: 12px;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        #presence-dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            margin-right: 5px;
+            background: #666;
+        }
+        #presence-dot.online { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
+        #presence-dot.offline { background: #ff4d4d; box-shadow: 0 0 5px #ff4d4d; }
+    </style>
+</head>
+<body>
+
+    <div id="lobby-frame">
+        <h1>CANTABALL ARENA</h1>
+        <p class="subtitle">Pick how you want to play</p>
+
+        <button class="lobby-btn" onclick="startVsCpu()">🤖 VS CPU</button>
+        <button class="lobby-btn" onclick="startRandomMatch()">🌐 1V1 RANDOM MATCH</button>
+        <button class="lobby-btn secondary" onclick="showPrivatePanel()">🔑 1V1 PRIVATE ROOM</button>
+
+        <div id="private-panel" class="lobby-panel">
+            <button class="lobby-btn" onclick="createPrivateRoom()">CREATE ROOM</button>
+            <label for="join-code-input">Or enter a room code</label>
+            <input id="join-code-input" maxlength="5" placeholder="ABCDE" autocomplete="off">
+            <button class="lobby-btn secondary" onclick="joinPrivateRoomFromInput()">JOIN ROOM</button>
+        </div>
+
+        <div id="lobby-status" class="lobby-status"></div>
+        <div id="room-code-box" class="room-code-display" style="display:none;"></div>
+        <div id="lobby-cancel" class="cancel-link" style="display:none;" onclick="cancelLobbyFlow()">Cancel</div>
+    </div>
+
+    <div id="table-frame" style="display:none;">
+        <div id="scoreboard">
+            <div class="score-box">
+                <span id="presence-dot"></span>
+                <span id="label-p1" style="color: #ff4d4d;">YOU</span>
+                <span id="score-p1" class="score-val">0</span>
+            </div>
+            <div id="turn-indicator">YOUR TURN</div>
+            <div class="score-box">
+                <span id="score-p2" class="score-val">0</span>
+                <span id="label-p2" style="color: #4d94ff;">CPU</span>
+            </div>
+        </div>
+
+        <div id="canvas-container">
+            <div id="overlay">
+                <h1 id="overlay-title">GOAL!</h1>
+                <p id="overlay-desc">Player scored!</p>
+                <button id="overlay-btn" onclick="handleOverlayClick()">CONTINUE</button>
+            </div>
+            <div id="log-text">Pass Successful!</div>
+            <div id="replay-banner">REPLAY</div>
+            <canvas id="gameCanvas" width="1000" height="550"></canvas>
+        </div>
+
+        <div id="action-bar">
+            <button id="btn-move" class="action-btn" onclick="setAction('MOVE')">MOVE</button>
+            <button id="btn-pass" class="action-btn" onclick="setAction('PASS')">PASS</button>
+            <button id="btn-shoot" class="action-btn" onclick="setAction('SHOOT')">SHOOT</button>
+            <button id="btn-replay" class="action-btn" onclick="playReplay()">🔁 REPLAY</button>
+
+            <div id="target-selector">
+                <button id="target-left" class="target-btn" onclick="setTargetZone('LEFT')">LEFT</button>
+                <button id="target-center" class="target-btn active-target" onclick="setTargetZone('CENTER')">CENTER</button>
+                <button id="target-right" class="target-btn" onclick="setTargetZone('RIGHT')">RIGHT</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const canvasContainer = document.getElementById('canvas-container');
+
+    const turnIndicator = document.getElementById('turn-indicator');
+    const scoreP1Display = document.getElementById('score-p1');
+    const scoreP2Display = document.getElementById('score-p2');
+    const btnMove = document.getElementById('btn-move');
+    const btnPass = document.getElementById('btn-pass');
+    const btnShoot = document.getElementById('btn-shoot');
+    const btnReplay = document.getElementById('btn-replay');
+    const targetSelector = document.getElementById('target-selector');
+    const targetLeft = document.getElementById('target-left');
+    const targetCenter = document.getElementById('target-center');
+    const targetRight = document.getElementById('target-right');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlayDesc = document.getElementById('overlay-desc');
+    const overlayBtn = document.getElementById('overlay-btn');
+    const logText = document.getElementById('log-text');
+    const replayBanner = document.getElementById('replay-banner');
+
+    const WIN_SCORE = 3;
+    const PieceRadius = 16;
+    const TouchHitboxRadius = 32; // Expanded hit area for mobile touches
+    const BallRadius = 7;
+    const MoveRadius = 140;
+    const ShootRange = 360;
+    const GoalWidth = 24;
+    const GoalHeight = 160;
+
+    const TEAM_USER = 'USER';
+    const TEAM_CPU = 'CPU';
+
+    let isPortrait = false;
+    let currentTurn = TEAM_USER;
+    let selectedPiece = null;
+    let selectedAction = null;
+    let targetZone = 'CENTER';
+    let score = { USER: 0, CPU: 0 };
+    let isAnimating = false;
+    let matchOver = false;
+
+    let pointerPos = null;
+
+    let ball = { x: 500, y: 275, carrier: null };
+    let pieces = [];
+
+    // Replay state — records the before/after board snapshot around the
+    // most recent action (local or remote) so it can be played back on
+    // demand without touching the real, live game state.
+    let lastSequence = null;   // { type, description, before, after }
+    let isReplaying = false;
+
+    // =====================================================================
+    // ONLINE PLAY — Supabase Realtime + Presence
+    // =====================================================================
+
+    // FILL THESE IN with your own Supabase project's values
+    // (Project Settings -> API). Run supabase_schema.sql against that
+    // project first, and make sure Realtime is enabled on both tables
+    // (the schema file's last two lines do that for you).
+    const SUPABASE_URL = 'https://smyhgyrbnmxykprimuve.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNteWhneXJibm14eWtwcmltdXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MDI2ODIsImV4cCI6MjEwMTI3ODY4Mn0.6eKJoV-d3sNdNQhFVp4vlkIC2381cLAIoWgRT1MmzFE';
+
+    const sb = (SUPABASE_URL.startsWith('http') && window.supabase)
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+        : null;
+
+    let mode = 'CPU';           // 'CPU' | 'ONLINE'
+    let myTeam = TEAM_USER;     // which team this browser controls
+    let myToken = null;         // random per-player identity, carried in the URL
+    let gameRowId = null;       // supabase games.id for the active match
+    let roomCode = null;
+    let gameChannel = null;     // realtime subscription for games row updates
+    let presenceChannel = null; // presence channel for online/offline status
+    let queueChannel = null;    // realtime subscription while waiting in the random queue
+    let queueRowId = null;
+    let suppressNextPush = false; // true while we're applying a remote state, so we don't echo it straight back
+
+    const lobbyFrame = document.getElementById('lobby-frame');
+    const tableFrame = document.getElementById('table-frame');
+    const privatePanel = document.getElementById('private-panel');
+    const lobbyStatus = document.getElementById('lobby-status');
+    const roomCodeBox = document.getElementById('room-code-box');
+    const lobbyCancel = document.getElementById('lobby-cancel');
+    const labelP1 = document.getElementById('label-p1');
+    const labelP2 = document.getElementById('label-p2');
+    const presenceDot = document.getElementById('presence-dot');
+
+    function uuid() {
+        return (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0;
+            return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+        }));
+    }
+
+    function generateRoomCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
+        let code = '';
+        for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        return code;
+    }
+
+    function setLobbyStatus(msg) {
+        lobbyStatus.textContent = msg;
+    }
+
+    function showPrivatePanel() {
+        privatePanel.classList.add('visible');
+    }
+
+    function cancelLobbyFlow() {
+        if (queueChannel) { sb.removeChannel(queueChannel); queueChannel = null; }
+        if (gameChannel) { sb.removeChannel(gameChannel); gameChannel = null; }
+        if (presenceChannel) { sb.removeChannel(presenceChannel); presenceChannel = null; }
+        roomCodeBox.style.display = 'none';
+        lobbyCancel.style.display = 'none';
+        setLobbyStatus('');
+        history.replaceState(null, '', window.location.pathname);
+    }
+
+    function requireSupabase() {
+        if (!sb) {
+            setLobbyStatus('Online play needs a Supabase project — fill in SUPABASE_URL / SUPABASE_ANON_KEY in the code.');
+            return false;
+        }
+        return true;
+    }
+
+    // ---- VS CPU ----
+    function startVsCpu() {
+        mode = 'CPU';
+        myTeam = TEAM_USER;
+        labelP1.textContent = 'YOU';
+        labelP2.textContent = 'CPU';
+        presenceDot.style.display = 'none';
+        enterGame();
+    }
+
+    // ---- PRIVATE ROOM ----
+    async function createPrivateRoom() {
+        if (!requireSupabase()) return;
+        myToken = uuid();
+        roomCode = generateRoomCode();
+        setLobbyStatus('Creating room...');
+
+        const initialState = buildInitialState();
+        const { data, error } = await sb.from('games').insert({
+            room_code: roomCode,
+            mode: 'PRIVATE',
+            player_a_token: myToken,
+            status: 'waiting',
+            state: initialState
+        }).select().single();
+
+        if (error) { setLobbyStatus('Could not create room: ' + error.message); return; }
+
+        gameRowId = data.id;
+        myTeam = TEAM_USER;
+        updateUrlForRoom();
+
+        roomCodeBox.textContent = roomCode;
+        roomCodeBox.style.display = 'block';
+        lobbyCancel.style.display = 'inline-block';
+        setLobbyStatus('Waiting for opponent to join with this code...');
+
+        subscribeWaitingForOpponent();
+    }
+
+    function joinPrivateRoomFromInput() {
+        const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+        if (code.length !== 5) { setLobbyStatus('Enter the 5-character room code.'); return; }
+        joinPrivateRoom(code);
+    }
+
+    async function joinPrivateRoom(code) {
+        if (!requireSupabase()) return;
+        myToken = uuid();
+        setLobbyStatus('Joining room...');
+
+        const { data: row, error: findErr } = await sb.from('games')
+            .select('*').eq('room_code', code).eq('status', 'waiting').is('player_b_token', null).maybeSingle();
+
+        if (findErr || !row) { setLobbyStatus('Room not found or already full.'); return; }
+
+        const { data: updated, error: updErr } = await sb.from('games')
+            .update({ player_b_token: myToken, status: 'active' })
+            .eq('id', row.id).eq('status', 'waiting').select().single();
+
+        if (updErr || !updated) { setLobbyStatus('That room was just taken. Try another code.'); return; }
+
+        gameRowId = updated.id;
+        roomCode = code;
+        myTeam = TEAM_CPU;
+        updateUrlForRoom();
+        beginOnlineMatch(updated);
+    }
+
+    function subscribeWaitingForOpponent() {
+        gameChannel = sb.channel('game-wait-' + gameRowId)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameRowId}` }, (payload) => {
+                if (payload.new.player_b_token && payload.new.status === 'active') {
+                    sb.removeChannel(gameChannel);
+                    gameChannel = null;
+                    beginOnlineMatch(payload.new);
+                }
+            })
+            .subscribe();
+    }
+
+    // ---- RANDOM MATCH ----
+    async function startRandomMatch() {
+        if (!requireSupabase()) return;
+        myToken = uuid();
+        lobbyCancel.style.display = 'inline-block';
+        setLobbyStatus('Searching for an opponent...');
+
+        const { data: myRow, error: insertErr } = await sb.from('matchmaking_queue')
+            .insert({ player_token: myToken, status: 'waiting' }).select().single();
+        if (insertErr) { setLobbyStatus('Could not join matchmaking: ' + insertErr.message); return; }
+        queueRowId = myRow.id;
+
+        // Try to claim an existing waiting opponent right away.
+        const claimed = await tryClaimOpponent();
+        if (claimed) return;
+
+        // Otherwise wait — someone else will claim us and set our game_id.
+        queueChannel = sb.channel('queue-wait-' + queueRowId)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matchmaking_queue', filter: `id=eq.${queueRowId}` }, async (payload) => {
+                if (payload.new.status === 'matched' && payload.new.game_id) {
+                    sb.removeChannel(queueChannel);
+                    queueChannel = null;
+                    const { data: gameRow } = await sb.from('games').select('*').eq('id', payload.new.game_id).single();
+                    if (gameRow) {
+                        gameRowId = gameRow.id;
+                        myTeam = TEAM_CPU;
+                        beginOnlineMatch(gameRow);
+                    }
+                }
+            })
+            .subscribe();
+    }
+
+    async function tryClaimOpponent() {
+        const { data: candidates } = await sb.from('matchmaking_queue')
+            .select('*').eq('status', 'waiting').neq('id', queueRowId).order('created_at', { ascending: true }).limit(5);
+
+        if (!candidates || candidates.length === 0) return false;
+
+        for (const candidate of candidates) {
+            const { data: claimedRow, error } = await sb.from('matchmaking_queue')
+                .update({ status: 'matched' }).eq('id', candidate.id).eq('status', 'waiting').select().maybeSingle();
+
+            if (!error && claimedRow) {
+                const initialState = buildInitialState();
+                const { data: newGame, error: gameErr } = await sb.from('games').insert({
+                    mode: 'RANDOM',
+                    player_a_token: myToken,
+                    player_b_token: candidate.player_token,
+                    status: 'active',
+                    state: initialState
+                }).select().single();
+
+                if (gameErr || !newGame) return false;
+
+                await sb.from('matchmaking_queue').update({ status: 'matched', game_id: newGame.id }).eq('id', candidate.id);
+                await sb.from('matchmaking_queue').update({ status: 'matched', game_id: newGame.id }).eq('id', queueRowId);
+
+                gameRowId = newGame.id;
+                myTeam = TEAM_USER;
+                beginOnlineMatch(newGame);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // ---- SHARED ONLINE SETUP ----
+    function updateUrlForRoom() {
+        const params = new URLSearchParams();
+        params.set('room', roomCode);
+        params.set('pid', myToken);
+        history.replaceState(null, '', '?' + params.toString());
+    }
+
+    function beginOnlineMatch(row) {
+        mode = 'ONLINE';
+        gameRowId = row.id;
+        roomCode = row.room_code || roomCode;
+        applyState(row.state, true);
+        labelP1.textContent = myTeam === TEAM_USER ? 'YOU' : 'YOU';
+        labelP2.textContent = 'OPPONENT';
+        presenceDot.style.display = 'inline-block';
+        subscribeToGame();
+        subscribeToPresence();
+        enterGame();
+    }
+
+    function subscribeToGame() {
+        gameChannel = sb.channel('game-live-' + gameRowId)
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameRowId}` }, (payload) => {
+                applyState(payload.new.state, false);
+            })
+            .subscribe();
+    }
+
+    function subscribeToPresence() {
+        presenceChannel = sb.channel('presence-' + gameRowId, { config: { presence: { key: myToken } } });
+        presenceChannel
+            .on('presence', { event: 'sync' }, () => {
+                const state = presenceChannel.presenceState();
+                const others = Object.keys(state).filter(k => k !== myToken);
+                presenceDot.classList.toggle('online', others.length > 0);
+                presenceDot.classList.toggle('offline', others.length === 0);
+            })
+            .subscribe(async (status) => {
+                if (status === 'SUBSCRIBED') await presenceChannel.track({ online_at: Date.now() });
+            });
+    }
+
+    function buildInitialState() {
+        updateCanvasOrientation();
+        initTeams();
+        currentTurn = TEAM_USER;
+        matchOver = false;
+        score = { USER: 0, CPU: 0 };
+        return serializeState();
+    }
+
+    function serializeState() {
+        return {
+            pieces: pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y })),
+            ball: { x: ball.x, y: ball.y, carrierId: ball.carrier ? ball.carrier.id : null },
+            score: { ...score },
+            currentTurn,
+            matchOver,
+            isPortrait,
+            lastScorer: window.__lastScorer || null
+        };
+    }
+
+    // Captures just the visual pieces/ball layout — used for replay
+    // snapshots (separate from serializeState, which is the full
+    // network-synced payload).
+    function snapshotBoard() {
+        return {
+            pieces: pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y })),
+            ball: { x: ball.x, y: ball.y, carrierId: ball.carrier ? ball.carrier.id : null }
+        };
+    }
+
+    function recordSequence(type, description, beforeSnap, afterSnap) {
+        lastSequence = { type, description, before: beforeSnap, after: afterSnap || snapshotBoard() };
+        updateReplayButton();
+    }
+
+    function updateReplayButton() {
+        btnReplay.classList.toggle('active', !!lastSequence && !isAnimating && !isReplaying);
+    }
+
+    // Applies a remote/synced game state. In ONLINE mode (and not on the
+    // initial load) this tweens every piece and the ball smoothly from
+    // their current positions to the new ones instead of snapping them
+    // instantly, and records the transition so it can be replayed later.
+    function applyState(s, isInitial) {
+        suppressNextPush = true;
+        const prevScore = { ...score };
+        const wasMatchOver = matchOver;
+
+        const prevPieces = pieces;
+        const prevBallX = ball.x;
+        const prevBallY = ball.y;
+
+        score = { ...s.score };
+
+        const shouldAnimate = !isInitial && !isAnimating && mode === 'ONLINE';
+
+        selectedPiece = null;
+        selectedAction = null;
+        pointerPos = null;
+
+        if (shouldAnimate) {
+            const prevById = {};
+            prevPieces.forEach(p => { prevById[p.id] = p; });
+
+            const beforeSnap = {
+                pieces: prevPieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y })),
+                ball: { x: prevBallX, y: prevBallY, carrierId: ball.carrier ? ball.carrier.id : null }
+            };
+            const afterSnap = {
+                pieces: s.pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y })),
+                ball: { x: s.ball.x, y: s.ball.y, carrierId: s.ball.carrierId }
+            };
+
+            // Start the new Piece objects at their OLD positions (if we
+            // had them) so animateRemoteUpdate can tween from there.
+            pieces = s.pieces.map(pd => {
+                const old = prevById[pd.id];
+                return new Piece(pd.id, pd.team, pd.role, old ? old.x : pd.x, old ? old.y : pd.y);
+            });
+
+            ball.x = prevBallX;
+            ball.y = prevBallY;
+            ball.carrier = null; // reattach once the animation lands
+
+            isAnimating = true;
+            animateRemoteUpdate(pieces, s.pieces, s.ball.x, s.ball.y, () => {
+                ball.x = s.ball.x;
+                ball.y = s.ball.y;
+                ball.carrier = s.ball.carrierId ? pieces.find(p => p.id === s.ball.carrierId) : null;
+                isAnimating = false;
+                recordSequence('REMOTE', "Opponent's last play", beforeSnap, afterSnap);
+                finishApplyState(s, prevScore, wasMatchOver);
+            });
+        } else {
+            pieces = s.pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y));
+            ball.x = s.ball.x;
+            ball.y = s.ball.y;
+            ball.carrier = s.ball.carrierId ? pieces.find(p => p.id === s.ball.carrierId) : null;
+            finishApplyState(s, prevScore, wasMatchOver);
+        }
+    }
+
+    // Tweens every piece from its current (old) position to its target
+    // position in lockstep, plus the ball alongside them, using the same
+    // easing as the local animateMovement()/animateBall() functions so
+    // remote moves feel identical to local ones instead of snapping.
+    function animateRemoteUpdate(pieceObjs, targetData, targetBallX, targetBallY, callback) {
+        const duration = 380;
+        const startTime = performance.now();
+        const starts = pieceObjs.map(p => ({ x: p.x, y: p.y }));
+        const ballStart = { x: ball.x, y: ball.y };
+
+        function step(now) {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const ease = 1 - Math.pow(1 - progress, 3);
+
+            pieceObjs.forEach((p, i) => {
+                const target = targetData[i];
+                p.x = starts[i].x + (target.x - starts[i].x) * ease;
+                p.y = starts[i].y + (target.y - starts[i].y) * ease;
+            });
+
+            ball.x = ballStart.x + (targetBallX - ballStart.x) * ease;
+            ball.y = ballStart.y + (targetBallY - ballStart.y) * ease;
+
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                pieceObjs.forEach((p, i) => {
+                    p.x = targetData[i].x;
+                    p.y = targetData[i].y;
+                });
+                callback();
+            }
+        }
+
+        requestAnimationFrame(step);
+    }
+
+    // Everything applyState used to do after snapping positions: turn
+    // state, UI refresh, goal/match-over overlays. Split out so both the
+    // animated and instant paths can call it once positions are final.
+    function finishApplyState(s, prevScore, wasMatchOver) {
+        currentTurn = s.currentTurn;
+        matchOver = s.matchOver;
+
+        updateActionButtons();
+        updateScoreboard();
+
+        if (!wasMatchOver) {
+            if (matchOver) {
+                showMatchEnd();
+            } else if ((score.USER + score.CPU) > (prevScore.USER + prevScore.CPU)) {
+                const scorerIsMe = s.lastScorer === myTeam;
+                showOverlay('GOAL!', scorerIsMe ? 'You scored!' : 'Opponent scored!');
+            }
+        }
+
+        turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : "OPPONENT'S TURN";
+        turnIndicator.style.borderColor = currentTurn === myTeam ? '#ff4d4d' : '#4d94ff';
+        suppressNextPush = false;
+    }
+
+    async function pushGameState(scorerTeam) {
+        if (mode !== 'ONLINE' || !gameRowId || suppressNextPush) return;
+        window.__lastScorer = scorerTeam || null;
+        const s = serializeState();
+        await sb.from('games').update({ state: s, updated_at: new Date().toISOString() }).eq('id', gameRowId);
+    }
+
+    function enterGame() {
+        lobbyFrame.style.display = 'none';
+        tableFrame.style.display = 'flex';
+        if (mode !== 'ONLINE') {
+            initTeams();
+        }
+        resizeCanvasDisplay();
+        updateScoreboard();
+        updateActionButtons();
+        turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : (mode === 'CPU' ? 'CPU THINKING...' : "OPPONENT'S TURN");
+        if (!window.__renderStarted) {
+            window.__renderStarted = true;
+            requestAnimationFrame(render);
+        }
+        if (mode === 'CPU' && currentTurn === TEAM_CPU) {
+            setTimeout(playCpuTurn, 800);
+        }
+    }
+
+    // Attempt to resume a game from the URL on page load (handles reload).
+    async function tryResumeFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const room = params.get('room');
+        const pid = params.get('pid');
+        if (!room || !pid || !requireSupabase()) return false;
+
+        myToken = pid;
+        roomCode = room;
+        setLobbyStatus('Reconnecting to room ' + room + '...');
+
+        const { data: row } = await sb.from('games').select('*').eq('room_code', room).maybeSingle();
+        if (!row) { setLobbyStatus('That room no longer exists.'); return false; }
+
+        gameRowId = row.id;
+        myTeam = row.player_a_token === pid ? TEAM_USER : TEAM_CPU;
+        beginOnlineMatch(row);
+        return true;
+    }
+
+    function updateCanvasOrientation() {
+        isPortrait = window.innerWidth <= 600 && window.innerHeight > window.innerWidth;
+        if (isPortrait) {
+            canvas.width = 550;
+            canvas.height = 1000;
+        } else {
+            canvas.width = 1000;
+            canvas.height = 550;
+        }
+    }
+
+    // FIX: previously the canvas relied on CSS `width:100%; height:auto;
+    // max-height:65vh; object-fit:contain;`. When the height:auto value
+    // (derived from the internal buffer's aspect ratio) exceeded the
+    // max-height cap, the browser kept width at 100% but clamped height to
+    // max-height - breaking the box's aspect ratio. object-fit:contain then
+    // letterboxed the actual rendered pitch inside that mismatched box,
+    // which is why the halfway line (drawn edge-to-edge in canvas
+    // coordinates) visually appeared inset from the container edges on
+    // portrait/mobile screens, and why touches landed on the wrong pieces
+    // (getBoundingClientRect returns the outer box, not the letterboxed
+    // visible area, so the tap-to-coordinate math was off).
+    //
+    // Fix: compute the exact display size in JS so the CSS box always
+    // matches the internal buffer's aspect ratio 1:1. No letterboxing is
+    // possible, and rect-based touch mapping stays accurate.
+    function resizeCanvasDisplay() {
+        const availW = canvasContainer.clientWidth || window.innerWidth;
+        const availH = window.innerHeight * 0.65;
+        const aspect = canvas.width / canvas.height;
+
+        let dispW = availW;
+        let dispH = dispW / aspect;
+
+        if (dispH > availH) {
+            dispH = availH;
+            dispW = dispH * aspect;
+        }
+
+        canvas.style.width = Math.round(dispW) + 'px';
+        canvas.style.height = Math.round(dispH) + 'px';
+    }
+
+    class Piece {
+        constructor(id, team, role, x, y) {
+            this.id = id;
+            this.team = team;
+            this.role = role;
+            this.x = x;
+            this.y = y;
+        }
+
+        draw() {
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+            ctx.shadowBlur = 6;
+            ctx.shadowOffsetX = 3;
+            ctx.shadowOffsetY = 4;
+
+            if (selectedPiece === this) {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, PieceRadius + 7, 0, Math.PI * 2);
+                ctx.strokeStyle = selectedAction === 'SHOOT' ? '#ff0055' : (selectedAction === 'PASS' ? '#ffcc00' : '#00ffff');
+                ctx.lineWidth = 3;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, PieceRadius, 0, Math.PI * 2);
+
+            const colorMain = this.team === TEAM_USER ?
+                (this.role === 'GK' ? '#ff9900' : '#d32f2f') :
+                (this.role === 'GK' ? '#00b894' : '#1976d2');
+
+            const colorLight = this.team === TEAM_USER ?
+                (this.role === 'GK' ? '#ffcc00' : '#ef5350') :
+                (this.role === 'GK' ? '#55efc4' : '#42a5f5');
+
+            const grad = ctx.createRadialGradient(this.x - 4, this.y - 4, 2, this.x, this.y, PieceRadius);
+            grad.addColorStop(0, colorLight);
+            grad.addColorStop(1, colorMain);
+            ctx.fillStyle = grad;
+            ctx.fill();
+
+            ctx.strokeStyle = this.role === 'GK' ? '#fff' : '#222';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            if (this.role === 'GK') {
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('GK', this.x, this.y);
+            }
+
+            ctx.restore();
+        }
+    }
+
+    function initTeams() {
+        updateCanvasOrientation();
+        resizeCanvasDisplay();
+        const midX = canvas.width / 2;
+        const midY = canvas.height / 2;
+
+        if (isPortrait) {
+            pieces = [
+                new Piece(1, TEAM_USER, 'GK', midX, canvas.height - 45),
+                new Piece(2, TEAM_USER, 'FIELD', midX - 120, canvas.height - 200),
+                new Piece(3, TEAM_USER, 'FIELD', midX + 120, canvas.height - 200),
+                new Piece(4, TEAM_USER, 'FIELD', midX, canvas.height - 320),
+                new Piece(5, TEAM_USER, 'FIELD', midX, canvas.height - 420),
+
+                new Piece(6, TEAM_CPU, 'GK', midX, 45),
+                new Piece(7, TEAM_CPU, 'FIELD', midX - 120, 200),
+                new Piece(8, TEAM_CPU, 'FIELD', midX + 120, 200),
+                new Piece(9, TEAM_CPU, 'FIELD', midX, 320),
+                new Piece(10, TEAM_CPU, 'FIELD', midX, 420)
+            ];
+        } else {
+            pieces = [
+                new Piece(1, TEAM_USER, 'GK', 45, midY),
+                new Piece(2, TEAM_USER, 'FIELD', 200, midY - 120),
+                new Piece(3, TEAM_USER, 'FIELD', 200, midY + 120),
+                new Piece(4, TEAM_USER, 'FIELD', 320, midY),
+                new Piece(5, TEAM_USER, 'FIELD', 420, midY),
+
+                new Piece(6, TEAM_CPU, 'GK', canvas.width - 45, midY),
+                new Piece(7, TEAM_CPU, 'FIELD', canvas.width - 200, midY - 120),
+                new Piece(8, TEAM_CPU, 'FIELD', canvas.width - 200, midY + 120),
+                new Piece(9, TEAM_CPU, 'FIELD', canvas.width - 320, midY),
+                new Piece(10, TEAM_CPU, 'FIELD', canvas.width - 420, midY)
+            ];
+        }
+
+        resetBallToCenter();
+    }
+
+    function resetBallToCenter() {
+        ball.x = canvas.width / 2;
+        ball.y = canvas.height / 2;
+        ball.carrier = null;
+        checkBallPossession();
+    }
+
+    function resetGoalKick(defendingTeam) {
+        // FIX: this used to snap the ball straight to the GK piece's
+        // CURRENT position, wherever that happened to be on the pitch -
+        // if the keeper had wandered upfield, a shot that missed the post
+        // would visually "find" them out there instead of behaving like a
+        // normal goal-kick restart. Now the ball always resets to the
+        // actual goal line, and the keeper only takes possession if
+        // they're actually close enough to their own goal for that to
+        // make sense; otherwise it's a loose ball up for grabs.
+        let goalX, goalY;
+        if (isPortrait) {
+            goalY = defendingTeam === TEAM_USER ? canvas.height - GoalWidth - 10 : GoalWidth + 10;
+            goalX = canvas.width / 2;
+        } else {
+            goalX = defendingTeam === TEAM_USER ? GoalWidth + 10 : canvas.width - GoalWidth - 10;
+            goalY = canvas.height / 2;
+        }
+
+        ball.x = goalX;
+        ball.y = goalY;
+        ball.carrier = null;
+
+        const targetGK = pieces.find(p => p.team === defendingTeam && p.role === 'GK');
+        if (targetGK) {
+            const distToGoal = Math.hypot(targetGK.x - goalX, targetGK.y - goalY);
+            if (distToGoal < 150) {
+                ball.carrier = targetGK;
+            }
+        }
+
+        if (!ball.carrier) {
+            checkBallPossession();
+        }
+    }
+
+    function checkBallPossession() {
+        let closest = null;
+        let minDist = PieceRadius + BallRadius + 5;
+
+        pieces.forEach(p => {
+            const d = Math.hypot(p.x - ball.x, p.y - ball.y);
+            if (d < minDist) {
+                minDist = d;
+                closest = p;
+            }
+        });
+
+        ball.carrier = closest;
+    }
+
+    // Shared helper: given a team, returns the CENTER of the goal that
+    // team is attacking (i.e. the enemy's goal), based on current
+    // orientation. This mirrors the per-team logic already used by
+    // handleShootAction() and drawShootIndicator() so the SHOOT button's
+    // range check and the actual shot resolution always agree — no matter
+    // which team (and therefore which side of the pitch) the local player
+    // is controlling.
+    function getEnemyGoalCenter(team) {
+        if (isPortrait) {
+            return { x: canvas.width / 2, y: team === TEAM_USER ? 0 : canvas.height };
+        } else {
+            return { x: team === TEAM_USER ? canvas.width : 0, y: canvas.height / 2 };
+        }
+    }
+
+    function setAction(action) {
+        if (currentTurn !== myTeam || !selectedPiece || isAnimating || isReplaying) return;
+
+        if (action === 'SHOOT') {
+            if (ball.carrier !== selectedPiece) return;
+            const enemyGoal = getEnemyGoalCenter(selectedPiece.team);
+            const distToGoal = Math.hypot(enemyGoal.x - selectedPiece.x, enemyGoal.y - selectedPiece.y);
+            if (distToGoal > ShootRange) {
+                showLog("Too far to shoot!");
+                return;
+            }
+        }
+
+        if (action === 'PASS' && ball.carrier !== selectedPiece) {
+            showLog("Must possess ball to pass!");
+            return;
+        }
+
+        selectedAction = action;
+        updateActionButtons();
+    }
+
+    function setTargetZone(zone) {
+        if (currentTurn !== myTeam || isAnimating || isReplaying) return;
+        targetZone = zone;
+
+        targetLeft.classList.remove('active-target');
+        targetCenter.classList.remove('active-target');
+        targetRight.classList.remove('active-target');
+
+        if (zone === 'LEFT') targetLeft.classList.add('active-target');
+        if (zone === 'CENTER') targetCenter.classList.add('active-target');
+        if (zone === 'RIGHT') targetRight.classList.add('active-target');
+    }
+
+    function updateActionButtons() {
+        btnMove.className = 'action-btn';
+        btnPass.className = 'action-btn';
+        btnShoot.className = 'action-btn';
+        targetSelector.style.display = 'none';
+
+        if (currentTurn === myTeam && selectedPiece && !isAnimating && !isReplaying) {
+            btnMove.classList.add('active');
+            if (selectedAction === 'MOVE') btnMove.classList.add('selected');
+
+            if (ball.carrier === selectedPiece) {
+                btnPass.classList.add('active');
+                if (selectedAction === 'PASS') btnPass.classList.add('selected');
+
+                const enemyGoal = getEnemyGoalCenter(selectedPiece.team);
+                const distToGoal = Math.hypot(enemyGoal.x - selectedPiece.x, enemyGoal.y - selectedPiece.y);
+                if (distToGoal <= ShootRange) {
+                    btnShoot.classList.add('active');
+                    if (selectedAction === 'SHOOT') {
+                        btnShoot.classList.add('selected');
+                        targetSelector.style.display = 'flex';
+                    }
+                }
+            }
+        }
+
+        updateReplayButton();
+    }
+
+    function switchTurn(nextTeam) {
+        selectedPiece = null;
+        selectedAction = null;
+        pointerPos = null;
+        updateActionButtons();
+
+        if (score.USER >= WIN_SCORE || score.CPU >= WIN_SCORE) {
+            matchOver = true;
+            showMatchEnd();
+            pushGameState();
+            return;
+        }
+
+        currentTurn = nextTeam ? nextTeam : (currentTurn === TEAM_USER ? TEAM_CPU : TEAM_USER);
+        turnIndicator.textContent = currentTurn === myTeam ? "YOUR TURN" : (mode === 'CPU' ? "CPU THINKING..." : "OPPONENT'S TURN");
+        turnIndicator.style.borderColor = currentTurn === myTeam ? "#ff4d4d" : "#4d94ff";
+
+        // In CPU mode the AI plays itself locally. In ONLINE mode the
+        // opposing team's moves come from the network (applyState), never
+        // from local AI, and we push our own resolved move so the other
+        // player's client picks it up via realtime.
+        if (mode === 'CPU' && currentTurn === TEAM_CPU) {
+            setTimeout(playCpuTurn, 800);
+        } else if (mode === 'ONLINE') {
+            pushGameState();
+        }
+    }
+
+    function getCanvasCoordinates(e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+            clientX = e.changedTouches[0].clientX;
+            clientY = e.changedTouches[0].clientY;
+        }
+
+        return {
+            x: (clientX - rect.left) * scaleX,
+            y: (clientY - rect.top) * scaleY
+        };
+    }
+
+    function handlePointerInput(e) {
+        if (currentTurn !== myTeam || isAnimating || isReplaying || matchOver) return;
+
+        const pos = getCanvasCoordinates(e);
+        const clickX = pos.x;
+        const clickY = pos.y;
+
+        // FIX (was missing): if we're already in PASS mode with the ball,
+        // tapping a teammate should complete the pass to them - this must
+        // be checked BEFORE generic piece (re)selection below, otherwise
+        // tapping any teammate (the only way to target a pass) just
+        // reselects that teammate instead of passing to them.
+        if (selectedAction === 'PASS' && selectedPiece && ball.carrier === selectedPiece) {
+            const teammates = pieces.filter(p => p.team === myTeam && p !== selectedPiece);
+            let passTarget = null;
+            let minTeammateDist = Infinity;
+
+            teammates.forEach(teammate => {
+                const distToPlayer = Math.hypot(teammate.x - clickX, teammate.y - clickY);
+                if (distToPlayer < TouchHitboxRadius + 10 && distToPlayer < minTeammateDist) {
+                    minTeammateDist = distToPlayer;
+                    passTarget = teammate;
+                }
+            });
+
+            if (passTarget) {
+                handlePassAction(selectedPiece, passTarget);
+                return;
+            }
+        }
+
+        // 1. Check direct piece selection across all user pieces
+        let clickedPiece = pieces.find(p => p.team === myTeam && Math.hypot(p.x - clickX, p.y - clickY) <= TouchHitboxRadius);
+
+        if (clickedPiece) {
+            selectedPiece = clickedPiece;
+            // FIX: default to MOVE for any selected piece (including the ball
+            // carrier). Previously this defaulted to PASS for the carrier,
+            // which silently blocked dribbling/movement unless the player
+            // remembered to tap the MOVE button first.
+            selectedAction = 'MOVE';
+            updateActionButtons();
+            return;
+        }
+
+        // 2. Handle Action Resolution if a piece is already selected
+        if (selectedPiece) {
+            if (selectedAction === 'MOVE') {
+                handleMoveAction(selectedPiece, clickX, clickY);
+            } else if (selectedAction === 'SHOOT') {
+                handleShootAction(selectedPiece, targetZone);
+            } else if (selectedAction === 'PASS') {
+                showLog("Tap a teammate to complete pass!");
+            }
+        }
+    }
+
+    // Touch and Event Listener setups
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        pointerPos = getCanvasCoordinates(e);
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        pointerPos = getCanvasCoordinates(e);
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        handlePointerInput(e);
+        pointerPos = null;
+    }, { passive: false });
+
+    canvas.addEventListener('click', (e) => {
+        handlePointerInput(e);
+    });
+
+    function resolveMovementWithCollisions(piece, destX, destY) {
+        destX = Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, destX));
+        destY = Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, destY));
+
+        const totalDist = Math.hypot(destX - piece.x, destY - piece.y);
+        if (totalDist > MoveRadius) {
+            const angle = Math.atan2(destY - piece.y, destX - piece.x);
+            destX = piece.x + Math.cos(angle) * MoveRadius;
+            destY = piece.y + Math.sin(angle) * MoveRadius;
+        }
+
+        const dx = destX - piece.x;
+        const dy = destY - piece.y;
+        const distance = Math.hypot(dx, dy);
+
+        if (distance === 0) return { finalX: piece.x, finalY: piece.y, hitPiece: null };
+
+        const dirX = dx / distance;
+        const dirY = dy / distance;
+        const minSpace = PieceRadius * 2 + 2; // Buffer space to prevent physical overlapping stickiness
+
+        let closestHitDist = distance;
+        let hitPiece = null;
+
+        pieces.forEach(other => {
+            if (other === piece) return;
+
+            const ox = other.x - piece.x;
+            const oy = other.y - piece.y;
+            const proj = ox * dirX + oy * dirY;
+
+            if (proj > 0 && proj < closestHitDist + minSpace) {
+                const perpDistSq = (ox * ox + oy * oy) - (proj * proj);
+                if (perpDistSq < minSpace * minSpace) {
+                    const hitOffset = Math.sqrt(Math.max(0, (minSpace * minSpace) - perpDistSq));
+                    const actualTravel = proj - hitOffset;
+
+                    if (actualTravel < closestHitDist) {
+                        closestHitDist = Math.max(0, actualTravel);
+                        hitPiece = other;
+                    }
+                }
+            }
+        });
+
+        return {
+            finalX: piece.x + dirX * closestHitDist,
+            finalY: piece.y + dirY * closestHitDist,
+            hitPiece: hitPiece
+        };
+    }
+
+    function handleMoveAction(piece, targetX, targetY) {
+        const beforeSnap = snapshotBoard();
+        const moveRes = resolveMovementWithCollisions(piece, targetX, targetY);
+
+        animateMovement(piece, moveRes.finalX, moveRes.finalY, () => {
+            let logMsg = null;
+
+            if (moveRes.hitPiece) {
+                if (ball.carrier === moveRes.hitPiece && moveRes.hitPiece.team !== piece.team) {
+                    if (Math.random() < 0.65) {
+                        ball.carrier = piece;
+                        logMsg = "Tackle Successful!";
+                    } else {
+                        logMsg = "Tackle Repelled!";
+                    }
+                } else if (!ball.carrier && Math.hypot(piece.x - ball.x, piece.y - ball.y) < PieceRadius + BallRadius + 15) {
+                    ball.carrier = piece;
+                    logMsg = "Ball Recovered!";
+                } else {
+                    logMsg = "Blocked by Player!";
+                }
+            } else if (!ball.carrier) {
+                if (Math.hypot(piece.x - ball.x, piece.y - ball.y) < PieceRadius + BallRadius + 15) {
+                    ball.carrier = piece;
+                    logMsg = "Ball Recovered!";
+                }
+            }
+
+            if (logMsg) showLog(logMsg);
+            recordSequence('MOVE', logMsg || 'Move', beforeSnap);
+            switchTurn();
+        });
+    }
+
+    function handlePassAction(passer, receiver) {
+        const beforeSnap = snapshotBoard();
+        isAnimating = true;
+        ball.carrier = null;
+
+        let interceptedBy = null;
+        const enemyTeam = passer.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+        const enemies = pieces.filter(p => p.team === enemyTeam);
+
+        enemies.forEach(enemy => {
+            const distToLane = distToSegment({ x: enemy.x, y: enemy.y }, { x: passer.x, y: passer.y }, { x: receiver.x, y: receiver.y });
+            if (distToLane < PieceRadius + 10) {
+                if (Math.random() < 0.6) {
+                    interceptedBy = enemy;
+                }
+            }
+        });
+
+        const targetPos = interceptedBy ? { x: interceptedBy.x, y: interceptedBy.y } : { x: receiver.x, y: receiver.y };
+
+        animateBall(targetPos.x, targetPos.y, () => {
+            let logMsg;
+            if (interceptedBy) {
+                ball.carrier = interceptedBy;
+                logMsg = "Pass Intercepted!";
+            } else {
+                ball.carrier = receiver;
+                logMsg = "Pass Complete!";
+            }
+            showLog(logMsg);
+            isAnimating = false;
+            recordSequence('PASS', logMsg, beforeSnap);
+            switchTurn();
+        });
+    }
+
+    function handleShootAction(shooter, zone = 'CENTER') {
+        const beforeSnap = snapshotBoard();
+        isAnimating = true;
+        ball.carrier = null;
+
+        const enemyTeam = shooter.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+        const enemyGK = pieces.find(p => p.team === enemyTeam && p.role === 'GK');
+
+        let targetX, targetY;
+        const GY_VAL = isPortrait ? canvas.width / 2 - GoalHeight / 2 : canvas.height / 2 - GoalHeight / 2;
+
+        if (isPortrait) {
+            targetY = shooter.team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth;
+            targetX = zone === 'LEFT' ? GY_VAL + 25 : (zone === 'RIGHT' ? GY_VAL + GoalHeight - 25 : canvas.width / 2);
+        } else {
+            targetX = shooter.team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth;
+            targetY = zone === 'LEFT' ? GY_VAL + 25 : (zone === 'RIGHT' ? GY_VAL + GoalHeight - 25 : canvas.height / 2);
+        }
+
+        let blocked = false;
+        let goalIsGuarded = false;
+        if (enemyGK) {
+            const gkBlockDist = distToSegment(
+                { x: enemyGK.x, y: enemyGK.y },
+                { x: shooter.x, y: shooter.y },
+                { x: targetX, y: targetY }
+            );
+
+            const maxBlockDist = PieceRadius + 30;
+            if (gkBlockDist < maxBlockDist) {
+                const proximity = 1 - (gkBlockDist / maxBlockDist);
+                const blockChance = 0.12 + proximity * proximity * 0.63;
+                if (Math.random() < blockChance) blocked = true;
+            }
+
+            // Separately track whether the keeper is even in a position to
+            // threaten this goal at all (near their own goal mouth),
+            // regardless of whether they happen to sit exactly on this
+            // particular shot's line. This is what "guards" the net.
+            const goalMouthX = isPortrait ? targetX : (shooter.team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth);
+            const goalMouthY = isPortrait ? (shooter.team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth) : targetY;
+            const gkDistFromGoal = Math.hypot(enemyGK.x - goalMouthX, enemyGK.y - goalMouthY);
+            goalIsGuarded = gkDistFromGoal < 220;
+        }
+
+        if (blocked) {
+            animateBall(enemyGK.x, enemyGK.y, () => {
+                ball.carrier = enemyGK;
+                showLog("SAVED BY GOALKEEPER!");
+                isAnimating = false;
+                recordSequence('SHOOT', 'Saved by Goalkeeper!', beforeSnap);
+                switchTurn(enemyTeam); // pushes state itself
+            });
+        } else {
+            const shotDist = Math.hypot(targetX - shooter.x, targetY - shooter.y);
+
+            // FIX: successChance used to be based purely on shot distance,
+            // completely ignoring the keeper's position. That meant even a
+            // wide-open net could "miss" the majority of the time from
+            // range, sending the ball right back toward the goal where the
+            // keeper often scooped it up - looking exactly like an empty
+            // net "automatically" finding the keeper. Now, if the keeper
+            // isn't actually guarding the goal, the shot is almost always
+            // a goal; distance only matters when there's a keeper there to
+            // realistically make it harder.
+            const successChance = goalIsGuarded
+                ? Math.max(0.35, 1 - (shotDist / (ShootRange * 1.1)))
+                : Math.max(0.9, 1 - (shotDist / (ShootRange * 2.5)));
+
+            if (Math.random() < successChance) {
+                animateBall(targetX, targetY, () => {
+                    score[shooter.team]++;
+                    updateScoreboard();
+                    const scorerLabel = shooter.team === myTeam ? "You" : (mode === 'CPU' ? "CPU" : "Opponent");
+                    recordSequence('GOAL', `${scorerLabel} scored!`, beforeSnap);
+                    showOverlay("GOAL!", `${scorerLabel} scored!`);
+                    isAnimating = false;
+                    if (mode === 'ONLINE') pushGameState(shooter.team);
+                });
+            } else {
+                const missOffset = (Math.random() > 0.5 ? 1 : -1) * (25 + Math.random() * 20);
+                const missX = isPortrait ? targetX + missOffset : targetX;
+                const missY = isPortrait ? targetY : targetY + missOffset;
+
+                animateBall(missX, missY, () => {
+                    showLog("Shot Missed - Goal Kick!");
+                    resetGoalKick(enemyTeam);
+                    isAnimating = false;
+                    recordSequence('SHOOT', 'Shot Missed - Goal Kick!', beforeSnap);
+                    switchTurn(enemyTeam);
+                });
+            }
+        }
+    }
+
+    function playCpuTurn() {
+        if (matchOver || mode !== 'CPU') return;
+
+        const cpuPieces = pieces.filter(p => p.team === TEAM_CPU);
+        const ballCarrier = ball.carrier;
+
+        if (ballCarrier && ballCarrier.team === TEAM_CPU) {
+            const enemyGoalX = isPortrait ? canvas.width / 2 : 0;
+            const enemyGoalY = isPortrait ? canvas.height : canvas.height / 2;
+            const distToUserGoal = Math.hypot(enemyGoalX - ballCarrier.x, enemyGoalY - ballCarrier.y);
+
+            if (distToUserGoal <= ShootRange && ballCarrier.role !== 'GK') {
+                const cpuZones = ['LEFT', 'CENTER', 'RIGHT'];
+                const chosenZone = cpuZones[Math.floor(Math.random() * cpuZones.length)];
+                handleShootAction(ballCarrier, chosenZone);
+                return;
+            }
+
+            const targetX = ballCarrier.x + (Math.random() * 60 - 30);
+            const targetY = isPortrait ? Math.min(canvas.height - PieceRadius - 20, ballCarrier.y + MoveRadius - 20) : ballCarrier.y + (Math.random() * 60 - 30);
+            handleMoveAction(ballCarrier, targetX, targetY);
+            return;
+        }
+
+        let activePiece = null;
+        let minDist = Infinity;
+
+        cpuPieces.forEach(p => {
+            if (p.role === 'GK') return;
+            const d = Math.hypot(p.x - ball.x, p.y - ball.y);
+            if (d < minDist) {
+                minDist = d;
+                activePiece = p;
+            }
+        });
+
+        if (!activePiece) activePiece = cpuPieces[1];
+        handleMoveAction(activePiece, ball.x, ball.y);
+    }
+
+    function animateMovement(piece, targetX, targetY, callback) {
+        isAnimating = true;
+        const startX = piece.x;
+        const startY = piece.y;
+        const duration = 380;
+        const startTime = performance.now();
+
+        function step(now) {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const ease = 1 - Math.pow(1 - progress, 3);
+
+            piece.x = startX + (targetX - startX) * ease;
+            piece.y = startY + (targetY - startY) * ease;
+
+            if (ball.carrier === piece) {
+                ball.x = piece.x;
+                ball.y = piece.y;
+            }
+
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                piece.x = targetX;
+                piece.y = targetY;
+                if (ball.carrier === piece) {
+                    ball.x = piece.x;
+                    ball.y = piece.y;
+                }
+                isAnimating = false;
+                callback();
+            }
+        }
+
+        requestAnimationFrame(step);
+    }
+
+    function animateBall(targetX, targetY, callback) {
+        const startX = ball.x;
+        const startY = ball.y;
+        const duration = 350;
+        const startTime = performance.now();
+
+        function step(now) {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            ball.x = startX + (targetX - startX) * progress;
+            ball.y = startY + (targetY - startY) * progress;
+
+            if (progress < 1) {
+                requestAnimationFrame(step);
+            } else {
+                ball.x = targetX;
+                ball.y = targetY;
+                callback();
+            }
+        }
+
+        requestAnimationFrame(step);
+    }
+
+    function distToSegment(p, v, w) {
+        const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+        if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+        let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+        t = Math.max(0, Math.min(1, t));
+        return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+    }
+
+    function drawPitch() {
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.lineWidth = 3;
+
+        if (isPortrait) {
+            const GY = canvas.width / 2 - GoalHeight / 2;
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height / 2);
+            ctx.lineTo(canvas.width, canvas.height / 2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, 75, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.strokeRect(GY - 30, 0, GoalHeight + 60, 150);
+            ctx.strokeRect(GY - 30, canvas.height - 150, GoalHeight + 60, 150);
+
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(GY, 0, GoalHeight, GoalWidth);
+            ctx.fillRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
+
+            ctx.strokeStyle = '#fbc02d';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(GY, 0, GoalHeight, GoalWidth);
+            ctx.strokeRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
+        } else {
+            const GY = canvas.height / 2 - GoalHeight / 2;
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, 75, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.strokeRect(0, GY - 30, 150, GoalHeight + 60);
+            ctx.strokeRect(canvas.width - 150, GY - 30, 150, GoalHeight + 60);
+
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(0, GY, GoalWidth, GoalHeight);
+            ctx.fillRect(canvas.width - GoalWidth, GY, GoalWidth, GoalHeight);
+
+            ctx.strokeStyle = '#fbc02d';
+            ctx.lineWidth = 6;
+            ctx.strokeRect(0, GY, GoalWidth, GoalHeight);
+            ctx.strokeRect(canvas.width - GoalWidth, GY, GoalWidth, GoalHeight);
+        }
+    }
+
+    function drawMovementRadius() {
+        if (currentTurn === myTeam && selectedPiece && selectedAction === 'MOVE' && !isAnimating) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(selectedPiece.x, selectedPiece.y, MoveRadius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 255, 255, 0.08)';
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 6]);
+            ctx.stroke();
+
+            // Draw current active dragging / target line
+            if (pointerPos) {
+                const moveRes = resolveMovementWithCollisions(selectedPiece, pointerPos.x, pointerPos.y);
+                ctx.beginPath();
+                ctx.moveTo(selectedPiece.x, selectedPiece.y);
+                ctx.lineTo(moveRes.finalX, moveRes.finalY);
+                ctx.strokeStyle = '#00ffff';
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(moveRes.finalX, moveRes.finalY, PieceRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+    }
+
+    function drawPassIndicators() {
+        if (currentTurn === myTeam && selectedPiece && selectedAction === 'PASS' && ball.carrier === selectedPiece && !isAnimating) {
+            const teammates = pieces.filter(p => p.team === myTeam && p !== selectedPiece);
+            const enemies = pieces.filter(p => p.team === TEAM_CPU);
+
+            teammates.forEach(teammate => {
+                let isBlocked = false;
+                enemies.forEach(enemy => {
+                    const distToLane = distToSegment({ x: enemy.x, y: enemy.y }, { x: selectedPiece.x, y: selectedPiece.y }, { x: teammate.x, y: teammate.y });
+                    if (distToLane < PieceRadius + 10) {
+                        isBlocked = true;
+                    }
+                });
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(selectedPiece.x, selectedPiece.y);
+                ctx.lineTo(teammate.x, teammate.y);
+                ctx.lineWidth = 3;
+
+                if (isBlocked) {
+                    ctx.strokeStyle = 'rgba(255, 77, 77, 0.7)';
+                    ctx.setLineDash([4, 6]);
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 204, 0, 0.8)';
+                    ctx.setLineDash([6, 4]);
+                }
+                ctx.stroke();
+
+                // Draw Receiver Target Touch Circle
+                ctx.beginPath();
+                ctx.arc(teammate.x, teammate.y, PieceRadius + 8, 0, Math.PI * 2);
+                ctx.strokeStyle = isBlocked ? '#ff4d4d' : '#ffcc00';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([]);
+                ctx.stroke();
+                ctx.restore();
+            });
+        }
+    }
+
+    // Mirrors drawPassIndicators() but for the SHOOT action - reuses the
+    // exact same target-position math as handleShootAction() and the same
+    // goalkeeper block-risk distance check, so the preview accurately
+    // reflects what will happen when the shot is taken.
+    function drawShootIndicator() {
+        if (currentTurn === myTeam && selectedPiece && selectedAction === 'SHOOT' && ball.carrier === selectedPiece && !isAnimating) {
+            const enemyTeam = selectedPiece.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+            const enemyGK = pieces.find(p => p.team === enemyTeam && p.role === 'GK');
+
+            const GY_VAL = isPortrait ? canvas.width / 2 - GoalHeight / 2 : canvas.height / 2 - GoalHeight / 2;
+            let targetX, targetY;
+
+            if (isPortrait) {
+                targetY = selectedPiece.team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth;
+                targetX = targetZone === 'LEFT' ? GY_VAL + 25 : (targetZone === 'RIGHT' ? GY_VAL + GoalHeight - 25 : canvas.width / 2);
+            } else {
+                targetX = selectedPiece.team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth;
+                targetY = targetZone === 'LEFT' ? GY_VAL + 25 : (targetZone === 'RIGHT' ? GY_VAL + GoalHeight - 25 : canvas.height / 2);
+            }
+
+            let isBlocked = false;
+            if (enemyGK) {
+                const gkBlockDist = distToSegment(
+                    { x: enemyGK.x, y: enemyGK.y },
+                    { x: selectedPiece.x, y: selectedPiece.y },
+                    { x: targetX, y: targetY }
+                );
+                if (gkBlockDist < PieceRadius + 30) isBlocked = true;
+            }
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(selectedPiece.x, selectedPiece.y);
+            ctx.lineTo(targetX, targetY);
+            ctx.lineWidth = 3;
+
+            if (isBlocked) {
+                ctx.strokeStyle = 'rgba(255, 77, 77, 0.7)';
+                ctx.setLineDash([4, 6]);
+            } else {
+                ctx.strokeStyle = 'rgba(255, 0, 85, 0.85)';
+                ctx.setLineDash([6, 4]);
+            }
+            ctx.stroke();
+
+            // Draw target zone marker in the goal
+            ctx.beginPath();
+            ctx.arc(targetX, targetY, 10, 0, Math.PI * 2);
+            ctx.strokeStyle = isBlocked ? '#ff4d4d' : '#ff0055';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    function drawBall() {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, BallRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        drawPitch();
+        drawMovementRadius();
+        drawPassIndicators();
+        drawShootIndicator();
+        pieces.forEach(p => p.draw());
+        drawBall();
+
+        requestAnimationFrame(render);
+    }
+
+    function updateScoreboard() {
+        scoreP1Display.textContent = score.USER;
+        scoreP2Display.textContent = score.CPU;
+    }
+
+    function showLog(msg) {
+        logText.textContent = msg;
+        logText.style.display = 'block';
+        setTimeout(() => {
+            logText.style.display = 'none';
+        }, 1800);
+    }
+
+    function showOverlay(title, desc) {
+        overlayTitle.textContent = title;
+        overlayDesc.textContent = desc;
+        overlayBtn.textContent = matchOver ? "RESTART MATCH" : "NEXT TURN";
+        overlay.style.display = 'flex';
+    }
+
+    function handleOverlayClick() {
+        overlay.style.display = 'none';
+        if (matchOver) {
+            score = { USER: 0, CPU: 0 };
+            updateScoreboard();
+            matchOver = false;
+            initTeams();
+            currentTurn = TEAM_USER;
+            turnIndicator.textContent = currentTurn === myTeam ? "YOUR TURN" : (mode === 'CPU' ? "CPU THINKING..." : "OPPONENT'S TURN");
+            if (mode === 'ONLINE') pushGameState();
+        } else {
+            initTeams();
+            switchTurn(); // pushes state itself when online
+        }
+    }
+
+    function showMatchEnd() {
+        const iWon = (myTeam === TEAM_USER && score.USER >= WIN_SCORE) || (myTeam === TEAM_CPU && score.CPU >= WIN_SCORE);
+        const winner = iWon ? "YOU WIN THE MATCH!" : (mode === 'CPU' ? "CPU WINS THE MATCH!" : "OPPONENT WINS THE MATCH!");
+        showOverlay("GAME OVER", winner);
+    }
+
+    // ---- REPLAY ----
+
+    function showReplayBanner(text) {
+        replayBanner.textContent = 'REPLAY: ' + text;
+        replayBanner.style.display = 'block';
+    }
+
+    function hideReplayBanner() {
+        replayBanner.style.display = 'none';
+    }
+
+    // Plays back the most recently recorded action sequence (local or
+    // remote) by temporarily rewinding the board to its "before" state,
+    // tweening through to the "after" state, then restoring the actual
+    // live game exactly as it was. Purely visual - never mutates real
+    // game state or triggers a network push.
+    function playReplay() {
+        if (!lastSequence || isReplaying || isAnimating) return;
+        isReplaying = true;
+        updateReplayButton();
+
+        const liveState = {
+            pieces: pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y)),
+            ballX: ball.x,
+            ballY: ball.y,
+            carrierId: ball.carrier ? ball.carrier.id : null,
+            selectedPiece,
+            selectedAction
+        };
+
+        selectedPiece = null;
+        selectedAction = null;
+        updateActionButtons();
+        showReplayBanner(lastSequence.description);
+
+        // Jump straight to the "before" positions of the recorded sequence.
+        pieces = lastSequence.before.pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y));
+        ball.x = lastSequence.before.ball.x;
+        ball.y = lastSequence.before.ball.y;
+        ball.carrier = lastSequence.before.ball.carrierId
+            ? pieces.find(p => p.id === lastSequence.before.ball.carrierId) : null;
+
+        setTimeout(() => {
+            animateRemoteUpdate(
+                pieces,
+                lastSequence.after.pieces,
+                lastSequence.after.ball.x,
+                lastSequence.after.ball.y,
+                () => {
+                    ball.carrier = lastSequence.after.ball.carrierId
+                        ? pieces.find(p => p.id === lastSequence.after.ball.carrierId) : null;
+
+                    setTimeout(() => {
+                        // Restore the real current game exactly as it was.
+                        pieces = liveState.pieces;
+                        ball.x = liveState.ballX;
+                        ball.y = liveState.ballY;
+                        ball.carrier = liveState.carrierId
+                            ? pieces.find(p => p.id === liveState.carrierId) : null;
+                        selectedPiece = liveState.selectedPiece;
+                        selectedAction = liveState.selectedAction;
+
+                        hideReplayBanner();
+                        isReplaying = false;
+                        updateActionButtons();
+                    }, 700); // brief pause on the final frame before restoring
+                }
+            );
+        }, 350); // brief pause on the starting frame so the "before" registers
+    }
+
+    window.addEventListener('resize', () => {
+        const prevPortrait = isPortrait;
+        updateCanvasOrientation();
+        if (prevPortrait !== isPortrait) {
+            initTeams();
+        } else {
+            resizeCanvasDisplay();
+        }
+    });
+
+    initTeams();
+    updateScoreboard();
+    render();
+
+</script>
+</body>
+</html>
