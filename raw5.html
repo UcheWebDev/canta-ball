@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Overview</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for circular progress ring */
+        .progress-ring-circle {
+            transition: stroke-dashoffset 0.35s;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+    </style>
+</head>
+<body class="bg-[#f7f8fa] flex justify-center items-center min-h-screen p-4 font-sans text-gray-800 antialiased">
+
+    <!-- Card Container -->
+    <div class="w-full max-w-sm bg-white rounded-2xl shadow-lg border border-gray-100 p-6 relative overflow-hidden flex flex-col justify-between min-h-[380px]">
+        
+        <div>
+            <!-- Top Header Bar (Mastercard Logo + More Options) -->
+            <div class="flex justify-between items-center mb-6">
+                <!-- Mastercard Logo Container -->
+                <div class="w-12 h-10 bg-[#f8f9fa] rounded-lg flex items-center justify-center p-2">
+                    <div class="flex items-center -space-x-2">
+                        <div class="w-4 h-4 bg-[#eb001b] rounded-full"></div>
+                        <div class="w-4 h-4 bg-[#f79e1b] rounded-full opacity-90"></div>
+                    </div>
+                </div>
+
+                <!-- Ellipsis Menu -->
+                <button class="text-gray-400 hover:text-gray-600 focus:outline-none tracking-widest text-lg font-bold">
+                    &bull;&bull;&bull;
+                </button>
+            </div>
+
+            <!-- Card Number Section -->
+            <div class="mb-6">
+                <div class="text-2xl font-mono text-gray-900 tracking-wider font-normal">
+                    4008 **** **** 9464
+                </div>
+                <div class="text-xs text-gray-400 mt-1">
+                    Card number
+                </div>
+            </div>
+
+            <!-- Balance and Progress Ring Area -->
+            <div class="flex justify-between items-center relative">
+                <div class="space-y-4">
+                    <!-- Available Balance -->
+                    <div>
+                        <div class="text-xl font-normal text-gray-900">
+                            $64120.00
+                        </div>
+                        <div class="text-xs text-gray-400 mt-0.5">
+                            Available balance
+                        </div>
+                    </div>
+
+                    <!-- Dotted Divider Line -->
+                    <div class="border-b border-dashed border-gray-200 w-36"></div>
+
+                    <!-- Expiration Date -->
+                    <div>
+                        <div class="text-lg font-normal text-gray-900">
+                            07/22
+                        </div>
+                        <div class="text-xs text-gray-400 mt-0.5">
+                            Valid
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Circular Progress Ring (35% Share) -->
+                <div class="relative w-32 h-32 flex items-center justify-center">
+                    <svg class="w-full h-full" viewBox="0 0 100 100">
+                        <!-- Background Circle Gradient Mask -->
+                        <defs>
+                            <radialGradient id="greenBg" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" stop-color="#70d63c" stop-opacity="0.1" />
+                                <stop offset="100%" stop-color="#70d63c" stop-opacity="0.02" />
+                            </radialGradient>
+                        </defs>
+                        <circle cx="50" cy="50" r="42" fill="url(#greenBg)" />
+                        
+                        <!-- Progress Arc -->
+                        <circle 
+                            class="progress-ring-circle" 
+                            stroke="#70d63c" 
+                            stroke-width="3" 
+                            stroke-linecap="round" 
+                            fill="transparent" 
+                            r="40" 
+                            cx="50" 
+                            cy="50"
+                            stroke-dasharray="251.2"
+                            stroke-dashoffset="163.28"
+                        />
+                    </svg>
+
+                    <!-- Center Label -->
+                    <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
+                        <span class="text-2xl font-medium text-[#64c932]">35%</span>
+                        <span class="text-xs text-[#70d63c] font-normal">Share</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer / Download Statement Button -->
+        <div class="pt-6 mt-4 flex justify-between items-center cursor-pointer group border-t border-transparent hover:border-gray-50 transition-colors">
+            <span class="text-sm font-semibold text-gray-900 group-hover:text-gray-700">
+                Donwload statement
+            </span>
+            <!-- Download Arrow Icon -->
+            <div class="text-[#f1b434] text-base group-hover:translate-y-0.5 transition-transform">
+                <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                </svg>
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Example API call sent by attacker tools to test if an email exists
+curl -s -X POST "https://login.microsoftonline.com/common/GetCredentialType" \
+  -H "Content-Type: application/json" \
+  -d '{"Username":"robyn.brass@clean-air.com"}'
+
+
+  toni.mason@clean-air.com
+  robyn.brass@clean-air.com
+  tiffany.matson@clean-air.com
