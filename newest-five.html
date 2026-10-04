@@ -140,6 +140,19 @@ canvas {
 .lobby-btn.secondary { background-color: #222; color: #ffcc00; border-color: #444; }
 .lobby-panel { display: none; margin: 10px 16px 0; padding: 14px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; text-align: left; }
 .lobby-panel.visible { display: block; }
+input, select, textarea { user-select: text; -webkit-user-select: text; }
+#register-frame { width: 100%; max-width: 480px; margin-top: 2vh; border-radius: 20px; background: rgba(18,18,22,0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 20px 60px rgba(0,0,0,0.7); padding: 24px 18px 20px; text-align: center; }
+#register-frame h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: 5px; color: #ffcc00; text-shadow: 0 0 15px rgba(255,204,0,0.6); }
+#register-frame .subtitle { color: #ccc; font-size: 13px; margin: 0 0 22px; }
+.form-group { margin-bottom: 14px; text-align: left; }
+.form-group label { display: block; font-size: 11px; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.form-group input, .form-group select { width: 100%; padding: 12px; font-size: 16px; background: #111; border: 2px solid #444; border-radius: 8px; color: #ffcc00; }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: #ffcc00; }
+.pname { color: #fff; font-size: 16px; font-weight: bold; padding: 2px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pname small { color: #999; font-weight: normal; font-size: 11px; margin-left: 6px; }
+.edit-link { color: #ffcc00; font-size: 11px; font-weight: normal; cursor: pointer; text-decoration: underline; margin-left: 8px; }
+#label-p1, #label-p2 { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+@media screen and (max-width: 600px) { #label-p1, #label-p2 { max-width: 62px; } }
 .tab-row { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 2px solid #333; }
 .tab-btn {
     flex: 1; padding: 10px 0; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; color: #888;
@@ -164,7 +177,25 @@ canvas {
 
 <div id="toast-container"></div>
 
-<div id="lobby-frame">
+<div id="register-frame" style="display:none;">
+    <h1>CANTABALL</h1>
+    <p class="subtitle" id="register-subtitle">Create your player profile to get started</p>
+    <div class="form-group"><label for="reg-name">Player name</label><input id="reg-name" maxlength="12" placeholder="Your name" autocomplete="off"></div>
+    <div class="form-group"><label for="reg-country">Country</label><select id="reg-country"></select></div>
+    <div class="form-group"><label for="reg-gender">Gender</label>
+        <select id="reg-gender">
+            <option value="">Select gender</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Prefer not to say">Prefer not to say</option>
+        </select>
+    </div>
+    <div id="reg-error" class="lobby-status" style="color:#ff6b6b;"></div>
+    <button id="reg-btn" class="lobby-btn" style="margin-top:8px;" onclick="submitRegistration()">START PLAYING</button>
+    <div id="reg-cancel" class="cancel-link" style="display:none;" onclick="enterLobbyScreen()">Cancel</div>
+</div>
+
+<div id="lobby-frame" style="display:none;">
     <div class="hero">
         <svg class="hero-ball" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#222" stroke-width="2"/><polygon points="24,14 33,21 30,32 18,32 15,21" fill="#222"/><path d="M24 14V4M33 21l10-4M30 32l7 8M18 32l-7 8M15 21L5 17" stroke="#222" stroke-width="2" fill="none"/></svg>
         <h1>CANTABALL</h1>
@@ -174,7 +205,7 @@ canvas {
     <div class="profile">
         <div id="avatar">P</div>
         <div class="profile-main">
-            <input id="player-name" maxlength="12" placeholder="Enter your name" autocomplete="off" oninput="saveName(this.value)">
+            <div id="player-name-display" class="pname"></div>
             <div class="stats">
                 <div><b id="stat-played">0</b><span>Played</span></div>
                 <div><b id="stat-won">0</b><span>Won</span></div>
@@ -432,8 +463,8 @@ function requireSupabase() {
 function startVsCpu() {
     mode = 'CPU';
     myTeam = TEAM_USER;
-    labelP1.textContent = myDisplayName();
-    labelP2.textContent = 'CPU';
+    opponentProfile = null;
+    refreshNames();
     presenceDot.style.display = 'none';
     clearCpuGame();
     enterGame();
@@ -442,7 +473,8 @@ function startVsCpu() {
 // ---- PRIVATE ROOM ----
 async function createPrivateRoom() {
     if (!requireSupabase()) return;
-    myToken = uuid();
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
     roomCode = generateRoomCode();
     setLobbyStatus('Creating room...');
 
@@ -473,12 +505,14 @@ function joinPrivateRoomFromInput() {
 
 async function joinPrivateRoom(code) {
     if (!requireSupabase()) return;
-    myToken = uuid();
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
     setLobbyStatus('Joining room...');
 
     const { data: row, error: findErr } = await sb.from('games')
         .select('*').eq('room_code', code).eq('status', 'waiting').is('player_b_token', null).maybeSingle();
     if (findErr || !row) { setLobbyStatus('Room not found or already full.'); return; }
+    if (row.player_a_token === myToken) { setLobbyStatus("That's your own room - share the code with a friend."); return; }
 
     const { data: updated, error: updErr } = await sb.from('games')
         .update({ player_b_token: myToken, status: 'active' })
@@ -507,7 +541,8 @@ function subscribeWaitingForOpponent() {
 // ---- RANDOM MATCH ----
 async function startRandomMatch() {
     if (!requireSupabase()) return;
-    myToken = uuid();
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
     lobbyCancel.style.display = 'inline-block';
     setLobbyStatus('Searching for an opponent...');
 
@@ -537,7 +572,7 @@ async function startRandomMatch() {
 
 async function tryClaimOpponent() {
     const { data: candidates } = await sb.from('matchmaking_queue')
-        .select('*').eq('status', 'waiting').gte('created_at', new Date(Date.now() - 120000).toISOString()).neq('id', queueRowId).order('created_at', { ascending: true }).limit(5);
+        .select('*').eq('status', 'waiting').gte('created_at', new Date(Date.now() - 120000).toISOString()).neq('id', queueRowId).neq('player_token', myToken).order('created_at', { ascending: true }).limit(5);
 
     if (!candidates || candidates.length === 0) return false;
 
@@ -581,9 +616,8 @@ function beginOnlineMatch(row) {
     applyState(row.state, true);
     lastSeenUpdatedAt = row.updated_at || null;
     saveSession();
-    labelP1.textContent = myDisplayName();
-    labelP2.textContent = 'OPPONENT';
-    if (row.state && row.state.name && row.state.by !== myToken) labelP2.textContent = row.state.name.toUpperCase();
+    loadOpponentProfile(row);
+    refreshNames();
     presenceDot.style.display = 'inline-block';
     subscribeToGame();
     subscribeToPresence();
@@ -597,7 +631,7 @@ function handleIncomingState(newState, updatedAt) {
     if (newState.leftBy && newState.leftBy !== myToken) {
         opponentLeftHandled = true;
         clearSession();
-        showToast('Opponent left the game', 'info');
+        showToast(oppName() + ' left the game', 'info');
         matchOver = true;
         turnIndicator.textContent = 'OPPONENT LEFT';
         return;
@@ -605,7 +639,7 @@ function handleIncomingState(newState, updatedAt) {
 
     // Ignore the echo of my own update - I already applied it locally.
     if (newState.by === myToken) return;
-    if (newState.name) labelP2.textContent = String(newState.name).slice(0, 12).toUpperCase();
+    if (newState.name && !opponentProfile) { opponentProfile = { name: String(newState.name).slice(0, 12) }; refreshNames(); }
     saveSession();
 
     const ev = newState.lastEvent;
@@ -645,11 +679,11 @@ function subscribeToPresence() {
             presenceDot.classList.toggle('offline', others.length === 0);
         })
         .on('presence', { event: 'join' }, ({ key }) => {
-            if (key !== myToken && mode === 'ONLINE' && !matchOver) showToast('Opponent connected', 'info');
+            if (key !== myToken && mode === 'ONLINE' && !matchOver) showToast(oppName() + ' connected', 'info');
         })
         .on('presence', { event: 'leave' }, ({ key }) => {
             if (key !== myToken && mode === 'ONLINE' && !opponentLeftHandled && !matchOver) {
-                showToast('Opponent disconnected', 'bad');
+                showToast(oppName() + ' disconnected', 'bad');
             }
         })
         .subscribe(async (status) => {
@@ -855,7 +889,7 @@ function finishApplyState(s, prevScore, wasMatchOver) {
             showMatchEnd();
         } else if (scoreChanged) {
             const scorerIsMe = s.lastScorer === myTeam;
-            showOverlay('GOAL!', scorerIsMe ? 'You scored!' : 'Opponent scored!');
+            showOverlay('GOAL!', scorerIsMe ? 'You scored!' : oppName() + ' scored!');
             if (!scorerIsMe) {
                 waitingForScorerReset = true;
                 overlayBtn.textContent = 'OK';
@@ -944,13 +978,139 @@ function resumeCpuGame() {
     if (!saved || !saved.state) { refreshResumeButton(); return; }
     mode = 'CPU';
     myTeam = TEAM_USER;
-    labelP1.textContent = myDisplayName();
-    labelP2.textContent = 'CPU';
+    opponentProfile = null;
+    refreshNames();
     presenceDot.style.display = 'none';
     resumingCpu = true;
     applyState(saved.state, true);
     enterGame();
     showToast('Match resumed', 'info');
+}
+
+// ---- Registered player (Supabase `users` table; id doubles as the game player token) ----
+const PROFILE_KEY = 'cantaball_profile_v1';
+let profile = null;           // {id, name, country, gender, synced}
+let opponentProfile = null;   // {name, country, gender} of the other human player
+const registerFrame = document.getElementById('register-frame');
+const COUNTRIES = "Afghanistan,Albania,Algeria,Andorra,Angola,Antigua and Barbuda,Argentina,Armenia,Australia,Austria,Azerbaijan,Bahamas,Bahrain,Bangladesh,Barbados,Belarus,Belgium,Belize,Benin,Bhutan,Bolivia,Bosnia and Herzegovina,Botswana,Brazil,Brunei,Bulgaria,Burkina Faso,Burundi,Cabo Verde,Cambodia,Cameroon,Canada,Central African Republic,Chad,Chile,China,Colombia,Comoros,Congo,Costa Rica,Côte d'Ivoire,Croatia,Cuba,Cyprus,Czechia,DR Congo,Denmark,Djibouti,Dominica,Dominican Republic,Ecuador,Egypt,El Salvador,Equatorial Guinea,Eritrea,Estonia,Eswatini,Ethiopia,Fiji,Finland,France,Gabon,Gambia,Georgia,Germany,Ghana,Greece,Grenada,Guatemala,Guinea,Guinea-Bissau,Guyana,Haiti,Honduras,Hungary,Iceland,India,Indonesia,Iran,Iraq,Ireland,Israel,Italy,Jamaica,Japan,Jordan,Kazakhstan,Kenya,Kiribati,Kosovo,Kuwait,Kyrgyzstan,Laos,Latvia,Lebanon,Lesotho,Liberia,Libya,Liechtenstein,Lithuania,Luxembourg,Madagascar,Malawi,Malaysia,Maldives,Mali,Malta,Marshall Islands,Mauritania,Mauritius,Mexico,Micronesia,Moldova,Monaco,Mongolia,Montenegro,Morocco,Mozambique,Myanmar,Namibia,Nauru,Nepal,Netherlands,New Zealand,Nicaragua,Niger,Nigeria,North Korea,North Macedonia,Norway,Oman,Pakistan,Palau,Palestine,Panama,Papua New Guinea,Paraguay,Peru,Philippines,Poland,Portugal,Qatar,Romania,Russia,Rwanda,Saint Kitts and Nevis,Saint Lucia,Saint Vincent and the Grenadines,Samoa,San Marino,São Tomé and Príncipe,Saudi Arabia,Senegal,Serbia,Seychelles,Sierra Leone,Singapore,Slovakia,Slovenia,Solomon Islands,Somalia,South Africa,South Korea,South Sudan,Spain,Sri Lanka,Sudan,Suriname,Sweden,Switzerland,Syria,Taiwan,Tajikistan,Tanzania,Thailand,Timor-Leste,Togo,Tonga,Trinidad and Tobago,Tunisia,Türkiye,Turkmenistan,Tuvalu,Uganda,Ukraine,United Arab Emirates,United Kingdom,United States,Uruguay,Uzbekistan,Vanuatu,Vatican City,Venezuela,Vietnam,Yemen,Zambia,Zimbabwe,Other".split(',');
+
+function loadProfile() {
+    try {
+        const v = JSON.parse(localStorage.getItem(PROFILE_KEY));
+        if (v && v.id && v.name && v.country && v.gender) return v;
+    } catch (e) {}
+    return null;
+}
+function saveProfileLocal() { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch (e) {} }
+
+async function syncProfile() {
+    if (!sb || !profile) return { ok: false, error: { message: 'no connection' } };
+    const { error } = await sb.from('users').upsert({
+        id: profile.id, name: profile.name, country: profile.country, gender: profile.gender, updated_at: new Date().toISOString()
+    });
+    if (!error) { profile.synced = true; saveProfileLocal(); }
+    return { ok: !error, error };
+}
+
+async function ensureProfile() {
+    if (!profile) { showRegister(false); return false; }
+    if (profile.synced) return true;
+    const r = await syncProfile();
+    if (!r.ok) {
+        setLobbyStatus('Could not save your profile online: ' + (r.error && r.error.message ? r.error.message : 'no connection'));
+        return false;
+    }
+    return true;
+}
+
+function oppName() {
+    if (mode === 'CPU') return 'CPU';
+    return opponentProfile && opponentProfile.name ? opponentProfile.name : 'Opponent';
+}
+
+// Left scoreboard box is always me, right box is always the opponent (colours follow the piece colours).
+function refreshNames() {
+    labelP1.textContent = myDisplayName();
+    labelP1.title = profile ? profile.country : '';
+    labelP2.textContent = mode === 'CPU' ? 'CPU' : (opponentProfile && opponentProfile.name ? opponentProfile.name.toUpperCase() : 'OPPONENT');
+    labelP2.title = opponentProfile && opponentProfile.country ? opponentProfile.country : '';
+    labelP1.style.color = myTeam === TEAM_USER ? '#ff4d4d' : '#4d94ff';
+    labelP2.style.color = myTeam === TEAM_USER ? '#4d94ff' : '#ff4d4d';
+    updateScoreboard();
+}
+
+function loadOpponentProfile(row) {
+    opponentProfile = null;
+    const oppToken = myTeam === TEAM_USER ? row.player_b_token : row.player_a_token;
+    if (!sb || !oppToken) return;
+    sb.from('users').select('name,country,gender').eq('id', oppToken).maybeSingle().then(({ data }) => {
+        if (data && mode === 'ONLINE' && !inLobby) { opponentProfile = data; refreshNames(); }
+    }, () => {});
+}
+
+function buildCountryOptions() {
+    const sel = document.getElementById('reg-country');
+    sel.innerHTML = '';
+    const first = document.createElement('option');
+    first.value = ''; first.textContent = 'Select country';
+    sel.appendChild(first);
+    COUNTRIES.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+}
+
+function showRegister(isEdit) {
+    lobbyFrame.style.display = 'none';
+    registerFrame.style.display = 'block';
+    document.getElementById('register-subtitle').textContent = isEdit ? 'Edit your player profile' : 'Create your player profile to get started';
+    document.getElementById('reg-btn').textContent = isEdit ? 'SAVE PROFILE' : 'START PLAYING';
+    document.getElementById('reg-cancel').style.display = isEdit ? 'inline-block' : 'none';
+    document.getElementById('reg-error').textContent = '';
+    let oldName = '';
+    try { oldName = localStorage.getItem(NAME_KEY) || ''; } catch (e) {}
+    document.getElementById('reg-name').value = isEdit && profile ? profile.name : oldName;
+    document.getElementById('reg-country').value = isEdit && profile ? profile.country : '';
+    document.getElementById('reg-gender').value = isEdit && profile ? profile.gender : '';
+}
+
+function editProfile() { showRegister(true); }
+
+function enterLobbyScreen() {
+    registerFrame.style.display = 'none';
+    lobbyFrame.style.display = 'block';
+    myName = profile ? profile.name : myName;
+    refreshProfile();
+}
+
+async function submitRegistration() {
+    const err = document.getElementById('reg-error');
+    const name = document.getElementById('reg-name').value.trim().replace(/\s+/g, ' ');
+    const country = document.getElementById('reg-country').value;
+    const gender = document.getElementById('reg-gender').value;
+    if (name.length < 2 || name.length > 12) { err.textContent = 'Enter a name between 2 and 12 characters.'; return; }
+    if (!country) { err.textContent = 'Please choose your country.'; return; }
+    if (!gender) { err.textContent = 'Please choose your gender.'; return; }
+    err.textContent = '';
+
+    profile = { id: profile ? profile.id : uuid(), name, country, gender, synced: false };
+    saveProfileLocal();
+    try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
+
+    const btn = document.getElementById('reg-btn');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    const r = await syncProfile();
+    btn.disabled = false;
+    btn.textContent = label;
+
+    enterLobbyScreen();
+    if (!r.ok) showToast('Profile saved on this device - it will sync when you go online', 'info');
+}
+
+function initProfileFlow() {
+    buildCountryOptions();
+    profile = loadProfile();
+    if (profile) { enterLobbyScreen(); tryResumeSession(); }
+    else showRegister(false);
 }
 
 // ---- Player profile (name + lifetime stats, stored on this device) ----
@@ -971,17 +1131,18 @@ function refreshProfile() {
     document.getElementById('stat-goals').textContent = st.goals;
     document.getElementById('stat-rate').textContent = (st.played ? Math.round(st.won / st.played * 100) : 0) + '%';
     document.getElementById('avatar').textContent = (myName || 'P').charAt(0).toUpperCase();
+    const nd = document.getElementById('player-name-display');
+    nd.textContent = '';
+    nd.appendChild(document.createTextNode(myName || 'Player'));
+    if (profile) { const sm = document.createElement('small'); sm.textContent = profile.country; nd.appendChild(sm); }
+    const ed = document.createElement('span'); ed.className = 'edit-link'; ed.textContent = '✎ Edit'; ed.onclick = editProfile; nd.appendChild(ed);
 }
 function saveName(v) {
     myName = String(v || '').trim().slice(0, 12);
     try { localStorage.setItem(NAME_KEY, myName); } catch (e) {}
     refreshProfile();
 }
-function initProfile() {
-    try { myName = localStorage.getItem(NAME_KEY) || ''; } catch (e) {}
-    document.getElementById('player-name').value = myName;
-    refreshProfile();
-}
+function initProfile() { refreshProfile(); }
 function recordResult(mine, theirs) {
     if (resultRecorded) return;
     resultRecorded = true;
@@ -1618,7 +1779,7 @@ function handleShootAction(shooter, zone = 'CENTER') {
         animateBall(targetX, targetY, () => {
             score[shooter.team]++;
             updateScoreboard();
-            const scorerLabel = shooter.team === myTeam ? "You" : (mode === 'CPU' ? "CPU" : "Opponent");
+            const scorerLabel = shooter.team === myTeam ? "You" : oppName();
             recordAction('GOAL', `${scorerLabel} scored!`, beforeSnap);
             showOverlay("GOAL!", `${scorerLabel} scored!`);
             isAnimating = false;
@@ -1952,8 +2113,8 @@ function render() {
 }
 
 function updateScoreboard() {
-    scoreP1Display.textContent = score.USER;
-    scoreP2Display.textContent = score.CPU;
+    scoreP1Display.textContent = myTeam === TEAM_USER ? score.USER : score.CPU;
+    scoreP2Display.textContent = myTeam === TEAM_USER ? score.CPU : score.USER;
 }
 
 // Small in-pitch hint pill (local hints only). Timer is reset so overlapping hints don't hide each other early.
@@ -2005,7 +2166,7 @@ function showMatchEnd() {
     if (mode === 'CPU') clearCpuGame();
     const mine = myTeam === TEAM_USER ? score.USER : score.CPU;
     const theirs = myTeam === TEAM_USER ? score.CPU : score.USER;
-    const other = mode === 'CPU' ? 'CPU' : 'OPPONENT';
+    const other = oppName().toUpperCase();
     recordResult(mine, theirs);
     let msg = mine > theirs ? 'YOU WIN THE MATCH!' : (mine < theirs ? `${other} WINS THE MATCH!` : "IT'S A DRAW!");
     showOverlay(timeUp ? 'FULL TIME' : 'GAME OVER', msg);
@@ -2045,6 +2206,7 @@ function teardownOnlineChannels() {
 function returnToLobby() {
     tableFrame.style.display = 'none';
     lobbyFrame.style.display = 'block';
+    opponentProfile = null;
     privatePanel.classList.remove('visible');
     roomCodeBox.style.display = 'none';
     lobbyCancel.style.display = 'none';
@@ -2147,10 +2309,9 @@ window.addEventListener('resize', () => {
 initTeams();
 updateScoreboard();
 window.__renderStarted = true;
-initProfile();
 refreshResumeButton();
 render();
-tryResumeSession();
+initProfileFlow();
 </script>
 </body>
 </html>
