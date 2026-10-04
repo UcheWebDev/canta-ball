@@ -1,0 +1,2316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CantaBall Arena - Mobile Adaptive</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+* { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+html, body { touch-action: pan-y; }
+body {
+    margin: 0; padding: 8px; background: radial-gradient(ellipse at 50% -10%, rgba(255,220,120,0.28), transparent 55%), radial-gradient(ellipse at 50% 120%, rgba(30,107,39,0.4), transparent 60%), #0e0803; display: flex; justify-content: center;
+    align-items: flex-start; min-height: 100vh; color: #fff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow-y: auto; overflow-x: hidden;
+}
+#table-frame {
+    width: 100%; max-width: 1000px; padding: 10px; background-color: #5d3a1a;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect fill="%235d3a1a" width="100" height="100"/><path d="M0 50 Q 25 40, 50 50 T 100 50" stroke="%234a2f15" fill="none" stroke-width="2"/></svg>');
+    border-radius: 12px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.8);
+    position: relative; display: flex; flex-direction: column; align-items: center;
+}
+#scoreboard {
+    width: 100%; height: auto; min-height: 44px; background-color: #111; border: 2px solid #333; border-radius: 6px;
+    display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin-bottom: 8px;
+    box-shadow: inset 0 0 10px #000;
+}
+.score-box { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 14px; }
+.score-val { color: #ffcc00; font-family: 'Courier New', Courier, monospace; font-size: 22px; text-shadow: 0 0 8px #ffcc00; }
+#center-box { display: flex; flex-direction: column; align-items: center; }
+#match-timer { font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #fff; letter-spacing: 1px; margin-bottom: 3px; }
+#match-timer.low { color: #ff4d4d; animation: timer-pulse 1s infinite; }
+@keyframes timer-pulse { 50% { opacity: 0.4; } }
+#turn-indicator {
+    font-size: 11px; color: #ff4d4d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+    background: #222; padding: 4px 10px; border-radius: 15px; border: 1px solid #ff4d4d; text-align: center;
+}
+#canvas-container {
+    position: relative; width: 100%; border-radius: 4px; overflow: hidden; box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    touch-action: none; display: flex; justify-content: center; align-items: center;
+}
+canvas {
+    display: block; background-color: #1e6b27;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><rect fill="%231e6b27" width="8" height="8"/><rect fill="%23185a20" width="2" height="2" x="0" y="0"/><rect fill="%23185a20" width="2" height="2" x="4" y="4"/></svg>');
+    cursor: pointer; touch-action: none;
+    /* width/height are set in JS (resizeCanvasDisplay) so the box always matches the buffer aspect ratio. */
+}
+#action-bar {
+    width: 100%; margin-top: 8px; background-color: #111; border: 2px solid #333; border-radius: 6px;
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 8px; gap: 6px;
+}
+.action-btn, .target-btn {
+    flex: 1 1 28%; min-height: 44px; padding: 8px 0; font-size: 13px; font-weight: bold; color: #888;
+    background-color: #222; border: 2px solid #444; border-radius: 6px; cursor: not-allowed;
+    transition: all 0.2s ease; -webkit-tap-highlight-color: transparent;
+}
+.action-btn.active { color: #111; background-color: #ffcc00; border-color: #ffe600; cursor: pointer; box-shadow: 0 0 10px rgba(255,204,0,0.4); }
+.action-btn.selected { outline: 2px solid #ff0055; background-color: #ff0055; color: #fff; }
+#btn-replay.active { color: #fff; background-color: #333; border-color: #ff0055; cursor: pointer; box-shadow: 0 0 10px rgba(255,0,85,0.3); }
+#target-selector { flex-wrap: wrap; }
+.take-shot-btn {
+    flex: 1 1 100%; min-height: 54px; font-size: 16px; font-weight: bold; letter-spacing: 1px; color: #fff;
+    background: linear-gradient(135deg, #ff0055, #c2003f); border: 2px solid #ff4d88; border-radius: 8px; cursor: pointer;
+    box-shadow: 0 0 14px rgba(255,0,85,0.5); -webkit-tap-highlight-color: transparent;
+}
+.take-shot-btn:active { transform: scale(0.98); }
+#target-selector {
+    display: none; width: 100%; align-items: center; gap: 6px; background: #1a1a1a; padding: 6px;
+    border-radius: 6px; border: 1px solid #333; margin-top: 4px;
+}
+.target-btn { flex: 1; cursor: pointer; font-size: 11px; padding: 8px 0; color: #ccc; border-color: #555; }
+.target-btn.active-target { background-color: #ff0055; border-color: #ff0055; color: #fff; box-shadow: 0 0 8px rgba(255,0,85,0.6); }
+#overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none;
+    flex-direction: column; justify-content: center; align-items: center; z-index: 10; backdrop-filter: blur(3px);
+    padding: 15px; text-align: center;
+}
+#overlay h1 { font-size: 36px; color: #ffcc00; margin: 0 0 8px 0; text-shadow: 0 0 15px #ffcc00; }
+#overlay p { font-size: 16px; color: #ccc; margin: 0 0 16px 0; }
+#overlay button {
+    padding: 10px 24px; font-size: 16px; font-weight: bold; background: #ffcc00; color: #000; border: none;
+    border-radius: 20px; cursor: pointer; box-shadow: 0 4px 15px rgba(255,204,0,0.4);
+}
+#log-text {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85);
+    color: #ffcc00; padding: 6px 14px; border-radius: 12px; font-size: 12px; pointer-events: none; display: none;
+    border: 1px solid #555; white-space: nowrap; z-index: 5;
+}
+#replay-banner {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85);
+    color: #ff0055; padding: 6px 16px; border-radius: 12px; font-size: 12px; font-weight: bold; letter-spacing: 1px;
+    text-transform: uppercase; pointer-events: none; display: none; border: 1px solid #ff0055;
+    box-shadow: 0 0 10px rgba(255,0,85,0.5); z-index: 6; white-space: nowrap;
+}
+#toast-container {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex;
+    flex-direction: column; gap: 8px; align-items: center; pointer-events: none; width: calc(100% - 16px);
+}
+.toast {
+    background: rgba(20,20,20,0.95); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px;
+    font-weight: bold; border: 1px solid #ff4d4d; box-shadow: 0 4px 15px rgba(0,0,0,0.5); opacity: 0;
+    transform: translateY(-10px); animation: toast-in 0.25s ease forwards, toast-out 0.4s ease forwards 3s;
+    max-width: 100%; text-align: center;
+}
+.toast-good { border-color: #2ecc71; }
+.toast-bad  { border-color: #ff4d4d; }
+.toast-foul { border-color: #ff9900; color: #ffcc66; background: rgba(60,30,0,0.96); }
+.toast-info { border-color: #4d94ff; }
+@keyframes toast-in { to { opacity: 1; transform: translateY(0); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-10px); } }
+@media screen and (max-width: 600px) {
+    body { padding: 4px; }
+    #table-frame { padding: 6px; border-radius: 8px; }
+}
+/* ---------- LOBBY ---------- */
+#lobby-frame { width: 100%; max-width: 480px; margin-top: 2vh; border-radius: 20px; overflow: hidden; background: rgba(18,18,22,0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 20px 60px rgba(0,0,0,0.7); padding-bottom: 18px; text-align: center; }
+.hero { position: relative; padding: 24px 16px 18px; background: repeating-linear-gradient(90deg, #1e6b27 0 44px, #1a5d22 44px 88px); border-bottom: 3px solid #ffcc00; overflow: hidden; }
+.hero::before { content: ''; position: absolute; left: 50%; top: 50%; width: 150px; height: 150px; margin: -75px 0 0 -75px; border: 2px solid rgba(255,255,255,0.25); border-radius: 50%; }
+.hero::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.25); }
+.hero > * { position: relative; z-index: 1; }
+.hero-ball { width: 46px; height: 46px; animation: ball-bounce 1.4s ease-in-out infinite; filter: drop-shadow(0 6px 4px rgba(0,0,0,0.4)); }
+@keyframes ball-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+.hero h1 { margin: 6px 0 2px; font-size: 32px; letter-spacing: 6px; color: #fff; text-shadow: 0 2px 0 #0a3d10, 0 0 18px rgba(255,204,0,0.6); }
+.hero .tag { font-size: 11px; letter-spacing: 3px; color: #ffe680; font-weight: bold; }
+.profile { display: flex; gap: 12px; align-items: center; margin: 16px 16px 4px; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; text-align: left; }
+#avatar { flex: 0 0 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #ff4d4d, #b71c1c); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; border: 2px solid #ffcc00; }
+.profile-main { flex: 1; min-width: 0; }
+#player-name { width: 100%; background: transparent; border: none; border-bottom: 1px dashed #666; color: #fff; font-size: 16px; font-weight: bold; padding: 2px 0 4px; outline: none; user-select: text; -webkit-user-select: text; }
+#player-name:focus { border-bottom-color: #ffcc00; }
+.stats { display: flex; gap: 18px; margin-top: 8px; }
+.stats div { display: flex; flex-direction: column; }
+.stats b { color: #ffcc00; font-family: 'Courier New', monospace; font-size: 16px; }
+.stats span { font-size: 9px; color: #999; letter-spacing: 1px; text-transform: uppercase; }
+.resume-banner { display: none; width: calc(100% - 32px); margin: 12px 16px 0; padding: 12px; border-radius: 12px; border: 1px solid #ff0055; background: rgba(255,0,85,0.14); color: #fff; font-weight: bold; font-size: 13px; cursor: pointer; letter-spacing: 1px; }
+.modes { display: flex; flex-direction: column; gap: 10px; margin: 14px 16px 0; }
+.mode-card { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px; text-align: left; color: #fff; cursor: pointer; background: linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03)); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; transition: transform .15s, border-color .15s, box-shadow .15s; -webkit-tap-highlight-color: transparent; font-family: inherit; }
+.mode-card:hover, .mode-card:active { transform: translateY(-2px); border-color: #ffcc00; box-shadow: 0 8px 20px rgba(255,204,0,0.15); }
+.mode-card.primary { background: linear-gradient(135deg, #ffcc00, #ff9900); color: #111; border-color: #ffe600; }
+.mode-ico { font-size: 26px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); border-radius: 12px; }
+.mode-txt { flex: 1; display: flex; flex-direction: column; }
+.mode-txt b { font-size: 15px; letter-spacing: 0.5px; }
+.mode-txt small { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+.chev { font-size: 24px; opacity: 0.6; }
+.howto { margin: 14px 16px 0; text-align: left; background: rgba(255,255,255,0.04); border-radius: 12px; border: 1px solid rgba(255,255,255,0.07); padding: 10px 14px; font-size: 12px; color: #ccc; }
+.howto summary { cursor: pointer; font-weight: bold; color: #ffcc00; letter-spacing: 1px; }
+.howto ul { margin: 8px 0 2px; padding-left: 18px; line-height: 1.7; }
+.lobby-btn { display: block; width: 100%; min-height: 48px; margin-bottom: 10px; font-size: 14px; font-weight: bold; color: #111; background-color: #ffcc00; border: 2px solid #ffe600; border-radius: 10px; cursor: pointer; }
+.lobby-btn.secondary { background-color: #222; color: #ffcc00; border-color: #444; }
+.lobby-panel { display: none; margin: 10px 16px 0; padding: 14px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; text-align: left; }
+.lobby-panel.visible { display: block; }
+input, select, textarea { user-select: text; -webkit-user-select: text; }
+#register-frame { width: 100%; max-width: 480px; margin-top: 2vh; border-radius: 20px; background: rgba(18,18,22,0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 20px 60px rgba(0,0,0,0.7); padding: 24px 18px 20px; text-align: center; }
+#register-frame h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: 5px; color: #ffcc00; text-shadow: 0 0 15px rgba(255,204,0,0.6); }
+#register-frame .subtitle { color: #ccc; font-size: 13px; margin: 0 0 22px; }
+.form-group { margin-bottom: 14px; text-align: left; }
+.form-group label { display: block; font-size: 11px; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.form-group input, .form-group select { width: 100%; padding: 12px; font-size: 16px; background: #111; border: 2px solid #444; border-radius: 8px; color: #ffcc00; }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: #ffcc00; }
+.pname { color: #fff; font-size: 16px; font-weight: bold; padding: 2px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pname small { color: #999; font-weight: normal; font-size: 11px; margin-left: 6px; }
+.edit-link { color: #ffcc00; font-size: 11px; font-weight: normal; cursor: pointer; text-decoration: underline; margin-left: 8px; }
+#label-p1, #label-p2 { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+@media screen and (max-width: 600px) { #label-p1, #label-p2 { max-width: 62px; } }
+.tab-row { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 2px solid #333; }
+.tab-btn {
+    flex: 1; padding: 10px 0; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; color: #888;
+    background: transparent; border: none; border-bottom: 3px solid transparent; margin-bottom: -2px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.tab-btn.active { color: #ffcc00; border-bottom-color: #ffcc00; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+.tab-hint { font-size: 12px; color: #aaa; margin: 0 0 12px 0; line-height: 1.4; }
+.lobby-panel label { display: block; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.lobby-panel input { width: 100%; padding: 10px; font-size: 18px; letter-spacing: 3px; text-align: center; text-transform: uppercase; background: #111; border: 2px solid #444; border-radius: 8px; color: #ffcc00; margin-bottom: 10px; user-select: text; -webkit-user-select: text; }
+.lobby-status { margin: 14px 16px 0; font-size: 13px; color: #ffcc00; min-height: 18px; }
+.room-code-display { margin: 12px 16px; font-family: 'Courier New', monospace; font-size: 28px; letter-spacing: 6px; color: #ffcc00; background: #111; border: 2px dashed #555; border-radius: 10px; padding: 10px; }
+.cancel-link { display: inline-block; margin-top: 14px; color: #ff4d4d; font-size: 12px; cursor: pointer; text-decoration: underline; }
+#presence-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; background: #666; }
+#presence-dot.online { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
+#presence-dot.offline { background: #ff4d4d; box-shadow: 0 0 5px #ff4d4d; }
+</style>
+</head>
+<body>
+
+<div id="toast-container"></div>
+
+<div id="register-frame" style="display:none;">
+    <h1>CANTABALL</h1>
+    <p class="subtitle" id="register-subtitle">Create your player profile to get started</p>
+    <div class="form-group"><label for="reg-name">Player name</label><input id="reg-name" maxlength="12" placeholder="Your name" autocomplete="off"></div>
+    <div class="form-group"><label for="reg-country">Country</label><select id="reg-country"></select></div>
+    <div class="form-group"><label for="reg-gender">Gender</label>
+        <select id="reg-gender">
+            <option value="">Select gender</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Prefer not to say">Prefer not to say</option>
+        </select>
+    </div>
+    <div id="reg-error" class="lobby-status" style="color:#ff6b6b;"></div>
+    <button id="reg-btn" class="lobby-btn" style="margin-top:8px;" onclick="submitRegistration()">START PLAYING</button>
+    <div id="reg-cancel" class="cancel-link" style="display:none;" onclick="enterLobbyScreen()">Cancel</div>
+</div>
+
+<div id="lobby-frame" style="display:none;">
+    <div class="hero">
+        <svg class="hero-ball" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#222" stroke-width="2"/><polygon points="24,14 33,21 30,32 18,32 15,21" fill="#222"/><path d="M24 14V4M33 21l10-4M30 32l7 8M18 32l-7 8M15 21L5 17" stroke="#222" stroke-width="2" fill="none"/></svg>
+        <h1>CANTABALL</h1>
+        <div class="tag">ARENA &middot; 5v5 TURN-BASED</div>
+    </div>
+
+    <div class="profile">
+        <div id="avatar">P</div>
+        <div class="profile-main">
+            <div id="player-name-display" class="pname"></div>
+            <div class="stats">
+                <div><b id="stat-played">0</b><span>Played</span></div>
+                <div><b id="stat-won">0</b><span>Won</span></div>
+                <div><b id="stat-rate">0%</b><span>Win rate</span></div>
+                <div><b id="stat-goals">0</b><span>Goals</span></div>
+            </div>
+        </div>
+    </div>
+
+    <button id="resume-cpu-btn" class="resume-banner" onclick="resumeCpuGame()">▶ RESUME YOUR CPU MATCH</button>
+
+    <div class="modes">
+        <button class="mode-card primary" onclick="startRandomMatch()"><span class="mode-ico">🌐</span><span class="mode-txt"><b>QUICK MATCH</b><small>Get paired with a random player online</small></span><span class="chev">›</span></button>
+        <button class="mode-card" onclick="showPrivatePanel()"><span class="mode-ico">🔑</span><span class="mode-txt"><b>PRIVATE ROOM</b><small>Play a friend with a 5-letter code</small></span><span class="chev">›</span></button>
+        <button class="mode-card" onclick="startVsCpu()"><span class="mode-ico">🤖</span><span class="mode-txt"><b>PRACTICE VS CPU</b><small>Warm up solo, no waiting</small></span><span class="chev">›</span></button>
+    </div>
+
+    <div id="private-panel" class="lobby-panel">
+        <div class="tab-row">
+            <button id="tab-create" class="tab-btn active" onclick="setPrivateTab('create')">CREATE GAME</button>
+            <button id="tab-join" class="tab-btn" onclick="setPrivateTab('join')">JOIN GAME</button>
+        </div>
+        <div id="pane-create" class="tab-pane active">
+            <p class="tab-hint">Create a room and share the 5-letter code with a friend.</p>
+            <button class="lobby-btn" style="margin-bottom:0;" onclick="createPrivateRoom()">CREATE ROOM</button>
+        </div>
+        <div id="pane-join" class="tab-pane">
+            <label for="join-code-input">Enter room code</label>
+            <input id="join-code-input" maxlength="5" placeholder="ABCDE" autocomplete="off">
+            <button class="lobby-btn" style="margin-bottom:0;" onclick="joinPrivateRoomFromInput()">JOIN ROOM</button>
+        </div>
+    </div>
+
+    <div id="lobby-status" class="lobby-status"></div>
+    <div id="room-code-box" class="room-code-display" style="display:none;"></div>
+    <div id="lobby-cancel" class="cancel-link" style="display:none;" onclick="cancelLobbyFlow()">Cancel</div>
+
+    <details class="howto">
+        <summary>HOW TO PLAY</summary>
+        <ul>
+            <li>Tap one of your players, then tap the pitch to <b>move</b> (they turn to face where they run).</li>
+            <li>The ball carrier can <b>pass</b> to a teammate or <b>shoot</b> when in range.</li>
+            <li>To shoot: pick <b>LEFT / CENTER / RIGHT</b> and check the aiming line, then press <b>TAKE SHOT</b>. The ball follows the line exactly, unless a defender is standing on it (the line turns red).</li>
+            <li>Win the ball by tackling the carrier from the <b>front</b>. Side or back tackles are <b>fouls</b>.</li>
+            <li>Matches last 5 minutes. First to 3 goals wins, or lead when time runs out.</li>
+            <li>Closed the tab by accident? Reopen the page and you'll rejoin automatically.</li>
+        </ul>
+    </details>
+</div>
+
+<div id="table-frame" style="display:none;">
+    <div id="scoreboard">
+        <div class="score-box">
+            <span id="presence-dot"></span>
+            <span id="label-p1" style="color: #ff4d4d;">YOU</span>
+            <span id="score-p1" class="score-val">0</span>
+        </div>
+        <div id="center-box"><div id="match-timer">5:00</div><div id="turn-indicator">YOUR TURN</div></div>
+        <div class="score-box">
+            <span id="score-p2" class="score-val">0</span>
+            <span id="label-p2" style="color: #4d94ff;">CPU</span>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <div id="overlay">
+            <h1 id="overlay-title">GOAL!</h1>
+            <p id="overlay-desc">Player scored!</p>
+            <button id="overlay-btn" onclick="handleOverlayClick()">CONTINUE</button>
+        </div>
+        <div id="log-text">Pass Successful!</div>
+        <div id="replay-banner">REPLAY</div>
+        <canvas id="gameCanvas" width="1000" height="550"></canvas>
+    </div>
+
+    <div id="action-bar">
+        <button id="btn-move" class="action-btn" onclick="setAction('MOVE')">MOVE</button>
+        <button id="btn-pass" class="action-btn" onclick="setAction('PASS')">PASS</button>
+        <button id="btn-shoot" class="action-btn" onclick="setAction('SHOOT')">SHOOT</button>
+        <button id="btn-replay" class="action-btn" onclick="playReplay()">🔁 REPLAY</button>
+        <div id="target-selector">
+            <button id="target-left" class="target-btn" onclick="setTargetZone('LEFT')">LEFT</button>
+            <button id="target-center" class="target-btn active-target" onclick="setTargetZone('CENTER')">CENTER</button>
+            <button id="target-right" class="target-btn" onclick="setTargetZone('RIGHT')">RIGHT</button>
+            <button id="btn-take-shot" class="take-shot-btn" onclick="takeShot()">🎯 TAKE SHOT</button>
+        </div>
+    </div>
+
+    <div id="leave-link" class="cancel-link" onclick="leaveGame()">Leave Game</div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const canvasContainer = document.getElementById('canvas-container');
+
+const turnIndicator = document.getElementById('turn-indicator');
+const scoreP1Display = document.getElementById('score-p1');
+const scoreP2Display = document.getElementById('score-p2');
+const btnMove = document.getElementById('btn-move');
+const btnPass = document.getElementById('btn-pass');
+const btnShoot = document.getElementById('btn-shoot');
+const btnReplay = document.getElementById('btn-replay');
+const targetSelector = document.getElementById('target-selector');
+const targetLeft = document.getElementById('target-left');
+const targetCenter = document.getElementById('target-center');
+const targetRight = document.getElementById('target-right');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlay-title');
+const overlayDesc = document.getElementById('overlay-desc');
+const overlayBtn = document.getElementById('overlay-btn');
+const logText = document.getElementById('log-text');
+const replayBanner = document.getElementById('replay-banner');
+const toastContainer = document.getElementById('toast-container');
+const matchTimerEl = document.getElementById('match-timer');
+const resumeCpuBtn = document.getElementById('resume-cpu-btn');
+
+const WIN_SCORE = 3;
+const PieceRadius = 16;
+const TouchHitboxRadius = 32;
+const BallRadius = 7;
+const MoveRadius = 140;
+const ShootRange = 360;
+const GoalWidth = 18;      // goal depth (was 24)
+const GoalHeight = 100;    // goal mouth size (was 160)
+const FRONT_HALF_ANGLE = Math.PI / 3;   // +/-60 degrees in front of a player = legal tackle zone
+const BACK_HALF_ANGLE = Math.PI * 3 / 4; // beyond 135 degrees from facing = from behind
+
+const TEAM_USER = 'USER';
+const TEAM_CPU = 'CPU';
+
+let isPortrait = false;
+let currentTurn = TEAM_USER;
+let selectedPiece = null;
+let selectedAction = null;
+let targetZone = 'CENTER';
+let score = { USER: 0, CPU: 0 };
+let isAnimating = false;
+let matchOver = false;
+let pointerPos = null;
+let ball = { x: 500, y: 275, carrier: null };
+let pieces = [];
+let inLobby = true;
+let opponentLeftHandled = false;
+
+// ---- Notification sync ----
+// Every gameplay event gets a unique id and travels inside the synced state
+// (state.lastEvent). The opponent shows it once, by id, so repeated identical
+// messages (e.g. two "Pass Complete!" in a row) are never swallowed and stale
+// messages are never re-shown.
+let pendingEvent = null;        // event created by my last action, consumed by the next push
+let lastShownEventId = null;    // last event id already toasted on this client
+let eventCounter = 0;
+let waitingForScorerReset = false; // true on the non-scoring client until the scorer resets the pitch
+let logTimer = null;
+
+// ---- Match clock ----
+const MATCH_DURATION_MS = 5 * 60 * 1000;   // 5 minute match
+let clockMs = MATCH_DURATION_MS;           // time remaining
+let clockLast = Date.now();
+let timeUp = false;
+
+// ---- Session persistence (rejoin after accidental leave / refresh / closed tab) ----
+const SESSION_KEY = 'cantaball_session_v1';
+const CPU_KEY = 'cantaball_cpu_v1';
+const SESSION_MAX_AGE = 6 * 60 * 60 * 1000;
+let lastSeenUpdatedAt = null;
+let resumingCpu = false;
+
+const MAX_REPLAY_HISTORY = 6;
+let actionHistory = [];
+let isReplaying = false;
+
+// =====================================================================
+// ONLINE PLAY - Supabase Realtime + Presence
+// =====================================================================
+const SUPABASE_URL = 'https://smyhgyrbnmxykprimuve.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNteWhneXJibm14eWtwcmltdXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MDI2ODIsImV4cCI6MjEwMTI3ODY4Mn0.6eKJoV-d3sNdNQhFVp4vlkIC2381cLAIoWgRT1MmzFE';
+
+const sb = (SUPABASE_URL.startsWith('http') && window.supabase)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+let mode = 'CPU';
+let myTeam = TEAM_USER;
+let myToken = null;
+let gameRowId = null;
+let roomCode = null;
+let gameChannel = null;
+let presenceChannel = null;
+let queueChannel = null;
+let queueRowId = null;
+let suppressNextPush = false;
+
+const lobbyFrame = document.getElementById('lobby-frame');
+const tableFrame = document.getElementById('table-frame');
+const privatePanel = document.getElementById('private-panel');
+const lobbyStatus = document.getElementById('lobby-status');
+const roomCodeBox = document.getElementById('room-code-box');
+const lobbyCancel = document.getElementById('lobby-cancel');
+const labelP1 = document.getElementById('label-p1');
+const labelP2 = document.getElementById('label-p2');
+const presenceDot = document.getElementById('presence-dot');
+
+function uuid() {
+    return (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    }));
+}
+
+function generateRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+}
+
+function setLobbyStatus(msg) { lobbyStatus.textContent = msg; }
+function showPrivatePanel() {
+    privatePanel.classList.add('visible');
+    setPrivateTab('create');
+}
+
+function setPrivateTab(tab) {
+    const isCreate = tab === 'create';
+    document.getElementById('tab-create').classList.toggle('active', isCreate);
+    document.getElementById('tab-join').classList.toggle('active', !isCreate);
+    document.getElementById('pane-create').classList.toggle('active', isCreate);
+    document.getElementById('pane-join').classList.toggle('active', !isCreate);
+    setLobbyStatus('');
+    if (!isCreate) setTimeout(() => document.getElementById('join-code-input').focus(), 50);
+}
+
+function cancelLobbyFlow() {
+    clearSession();
+    if (sb && queueRowId) { sb.from('matchmaking_queue').delete().eq('id', queueRowId).then(() => {}, () => {}); queueRowId = null; }
+    if (sb && gameRowId && mode !== 'ONLINE') { sb.from('games').delete().eq('id', gameRowId).eq('status', 'waiting').then(() => {}, () => {}); gameRowId = null; }
+    if (queueChannel) { sb.removeChannel(queueChannel); queueChannel = null; }
+    if (gameChannel) { sb.removeChannel(gameChannel); gameChannel = null; }
+    if (presenceChannel) { sb.removeChannel(presenceChannel); presenceChannel = null; }
+    roomCodeBox.style.display = 'none';
+    lobbyCancel.style.display = 'none';
+    setLobbyStatus('');
+    history.replaceState(null, '', window.location.pathname);
+}
+
+function requireSupabase() {
+    if (!sb) {
+        setLobbyStatus('Online play needs a Supabase project - fill in SUPABASE_URL / SUPABASE_ANON_KEY in the code.');
+        return false;
+    }
+    return true;
+}
+
+// ---- VS CPU ----
+function startVsCpu() {
+    mode = 'CPU';
+    myTeam = TEAM_USER;
+    opponentProfile = null;
+    refreshNames();
+    presenceDot.style.display = 'none';
+    clearCpuGame();
+    enterGame();
+}
+
+// ---- PRIVATE ROOM ----
+async function createPrivateRoom() {
+    if (!requireSupabase()) return;
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
+    roomCode = generateRoomCode();
+    setLobbyStatus('Creating room...');
+
+    const initialState = buildInitialState();
+    const { data, error } = await sb.from('games').insert({
+        room_code: roomCode, mode: 'PRIVATE', player_a_token: myToken, status: 'waiting', state: initialState
+    }).select().single();
+
+    if (error) { setLobbyStatus('Could not create room: ' + error.message); return; }
+
+    gameRowId = data.id;
+    myTeam = TEAM_USER;
+    updateUrlForRoom();
+    saveSession();
+
+    roomCodeBox.textContent = roomCode;
+    roomCodeBox.style.display = 'block';
+    lobbyCancel.style.display = 'inline-block';
+    setLobbyStatus('Waiting for opponent to join with this code...');
+    subscribeWaitingForOpponent();
+}
+
+function joinPrivateRoomFromInput() {
+    const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+    if (code.length !== 5) { setLobbyStatus('Enter the 5-character room code.'); return; }
+    joinPrivateRoom(code);
+}
+
+async function joinPrivateRoom(code) {
+    if (!requireSupabase()) return;
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
+    setLobbyStatus('Joining room...');
+
+    const { data: row, error: findErr } = await sb.from('games')
+        .select('*').eq('room_code', code).eq('status', 'waiting').is('player_b_token', null).maybeSingle();
+    if (findErr || !row) { setLobbyStatus('Room not found or already full.'); return; }
+    if (row.player_a_token === myToken) { setLobbyStatus("That's your own room - share the code with a friend."); return; }
+
+    const { data: updated, error: updErr } = await sb.from('games')
+        .update({ player_b_token: myToken, status: 'active' })
+        .eq('id', row.id).eq('status', 'waiting').select().single();
+    if (updErr || !updated) { setLobbyStatus('That room was just taken. Try another code.'); return; }
+
+    gameRowId = updated.id;
+    roomCode = code;
+    myTeam = TEAM_CPU;
+    updateUrlForRoom();
+    beginOnlineMatch(updated);
+}
+
+function subscribeWaitingForOpponent() {
+    gameChannel = sb.channel('game-wait-' + gameRowId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameRowId}` }, (payload) => {
+            if (payload.new.player_b_token && payload.new.status === 'active') {
+                sb.removeChannel(gameChannel);
+                gameChannel = null;
+                beginOnlineMatch(payload.new);
+            }
+        })
+        .subscribe();
+}
+
+// ---- RANDOM MATCH ----
+async function startRandomMatch() {
+    if (!requireSupabase()) return;
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
+    lobbyCancel.style.display = 'inline-block';
+    setLobbyStatus('Searching for an opponent...');
+
+    const { data: myRow, error: insertErr } = await sb.from('matchmaking_queue')
+        .insert({ player_token: myToken, status: 'waiting' }).select().single();
+    if (insertErr) { setLobbyStatus('Could not join matchmaking: ' + insertErr.message); return; }
+    queueRowId = myRow.id;
+
+    const claimed = await tryClaimOpponent();
+    if (claimed) return;
+
+    queueChannel = sb.channel('queue-wait-' + queueRowId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matchmaking_queue', filter: `id=eq.${queueRowId}` }, async (payload) => {
+            if (payload.new.status === 'matched' && payload.new.game_id) {
+                sb.removeChannel(queueChannel);
+                queueChannel = null;
+                const { data: gameRow } = await sb.from('games').select('*').eq('id', payload.new.game_id).single();
+                if (gameRow) {
+                    gameRowId = gameRow.id;
+                    myTeam = TEAM_CPU;
+                    beginOnlineMatch(gameRow);
+                }
+            }
+        })
+        .subscribe();
+}
+
+async function tryClaimOpponent() {
+    const { data: candidates } = await sb.from('matchmaking_queue')
+        .select('*').eq('status', 'waiting').gte('created_at', new Date(Date.now() - 120000).toISOString()).neq('id', queueRowId).neq('player_token', myToken).order('created_at', { ascending: true }).limit(5);
+
+    if (!candidates || candidates.length === 0) return false;
+
+    for (const candidate of candidates) {
+        const { data: claimedRow, error } = await sb.from('matchmaking_queue')
+            .update({ status: 'matched' }).eq('id', candidate.id).eq('status', 'waiting').select().maybeSingle();
+
+        if (!error && claimedRow) {
+            const initialState = buildInitialState();
+            const { data: newGame, error: gameErr } = await sb.from('games').insert({
+                mode: 'RANDOM', player_a_token: myToken, player_b_token: candidate.player_token,
+                status: 'active', state: initialState
+            }).select().single();
+
+            if (gameErr || !newGame) return false;
+
+            await sb.from('matchmaking_queue').update({ status: 'matched', game_id: newGame.id }).eq('id', candidate.id);
+            await sb.from('matchmaking_queue').update({ status: 'matched', game_id: newGame.id }).eq('id', queueRowId);
+
+            gameRowId = newGame.id;
+            myTeam = TEAM_USER;
+            beginOnlineMatch(newGame);
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---- SHARED ONLINE SETUP ----
+function updateUrlForRoom() {
+    const params = new URLSearchParams();
+    params.set('room', roomCode);
+    params.set('pid', myToken);
+    history.replaceState(null, '', '?' + params.toString());
+}
+
+function beginOnlineMatch(row) {
+    mode = 'ONLINE';
+    gameRowId = row.id;
+    roomCode = row.room_code || roomCode;
+    applyState(row.state, true);
+    lastSeenUpdatedAt = row.updated_at || null;
+    saveSession();
+    loadOpponentProfile(row);
+    refreshNames();
+    presenceDot.style.display = 'inline-block';
+    subscribeToGame();
+    subscribeToPresence();
+    enterGame();
+}
+
+function handleIncomingState(newState, updatedAt) {
+    if (!newState) return;
+    if (updatedAt) lastSeenUpdatedAt = updatedAt;
+
+    if (newState.leftBy && newState.leftBy !== myToken) {
+        opponentLeftHandled = true;
+        clearSession();
+        showToast(oppName() + ' left the game', 'info');
+        matchOver = true;
+        turnIndicator.textContent = 'OPPONENT LEFT';
+        return;
+    }
+
+    // Ignore the echo of my own update - I already applied it locally.
+    if (newState.by === myToken) return;
+    if (newState.name && !opponentProfile) { opponentProfile = { name: String(newState.name).slice(0, 12) }; refreshNames(); }
+    saveSession();
+
+    const ev = newState.lastEvent;
+    if (ev && ev.id && ev.id !== lastShownEventId) {
+        lastShownEventId = ev.id;
+        showToast(ev.msg, ev.type);
+    }
+    applyState(newState, false);
+}
+
+function subscribeToGame() {
+    gameChannel = sb.channel('game-live-' + gameRowId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameRowId}` }, (payload) => {
+            handleIncomingState(payload.new.state, payload.new.updated_at);
+        })
+        .subscribe();
+}
+
+// After a dropped connection / phone sleep, realtime can miss updates - pull the latest row.
+async function resyncFromServer() {
+    if (mode !== 'ONLINE' || !gameRowId || !sb || inLobby || isAnimating) return;
+    const { data: row } = await sb.from('games').select('state, updated_at').eq('id', gameRowId).maybeSingle();
+    if (!row || !row.state) return;
+    if (lastSeenUpdatedAt && new Date(row.updated_at) <= new Date(lastSeenUpdatedAt)) return;
+    handleIncomingState(row.state, row.updated_at);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resyncFromServer(); });
+window.addEventListener('online', resyncFromServer);
+
+function subscribeToPresence() {
+    presenceChannel = sb.channel('presence-' + gameRowId, { config: { presence: { key: myToken } } });
+    presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+            const state = presenceChannel.presenceState();
+            const others = Object.keys(state).filter(k => k !== myToken);
+            presenceDot.classList.toggle('online', others.length > 0);
+            presenceDot.classList.toggle('offline', others.length === 0);
+        })
+        .on('presence', { event: 'join' }, ({ key }) => {
+            if (key !== myToken && mode === 'ONLINE' && !matchOver) showToast(oppName() + ' connected', 'info');
+        })
+        .on('presence', { event: 'leave' }, ({ key }) => {
+            if (key !== myToken && mode === 'ONLINE' && !opponentLeftHandled && !matchOver) {
+                showToast(oppName() + ' disconnected', 'bad');
+            }
+        })
+        .subscribe(async (status) => {
+            if (status === 'SUBSCRIBED') await presenceChannel.track({ online_at: Date.now() });
+        });
+}
+
+function buildInitialState() {
+    updateCanvasOrientation();
+    initTeams();
+    currentTurn = TEAM_USER;
+    matchOver = false;
+    score = { USER: 0, CPU: 0 };
+    pendingEvent = null;
+    clockMs = MATCH_DURATION_MS;
+    timeUp = false;
+    return serializeState();
+}
+
+function serializeState() {
+    return {
+        pieces: pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+        ball: { x: ball.x, y: ball.y, carrierId: ball.carrier ? ball.carrier.id : null },
+        score: { ...score },
+        currentTurn,
+        matchOver,
+        isPortrait,
+        lastScorer: window.__lastScorer || null,
+        lastEvent: pendingEvent,
+        clockMs: Math.round(clockMs),
+        timeUp,
+        name: myName || null,
+        by: myToken
+    };
+}
+
+function snapshotBoard() {
+    return {
+        pieces: pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+        ball: { x: ball.x, y: ball.y, carrierId: ball.carrier ? ball.carrier.id : null }
+    };
+}
+
+function recordAction(type, description, beforeSnap, afterSnap) {
+    actionHistory.push({ type, description, before: beforeSnap, after: afterSnap || snapshotBoard() });
+    if (actionHistory.length > MAX_REPLAY_HISTORY) actionHistory.shift();
+    updateReplayButton();
+}
+
+function updateReplayButton() {
+    btnReplay.classList.toggle('active', actionHistory.length > 0 && !isAnimating && !isReplaying);
+}
+
+function toastTypeFor(msg) {
+    if (/foul/i.test(msg)) return 'foul';
+    if (/clean|complete|recovered|scored/i.test(msg)) return 'good';
+    if (/intercept|repel|blocked|missed|saved/i.test(msg)) return 'bad';
+    return 'info';
+}
+
+// Toast for me + queue the event so it rides along with the next state push to the opponent.
+function logAndToast(msg, type) {
+    if (!msg) return;
+    type = type || toastTypeFor(msg);
+    showToast(msg, type);
+    pendingEvent = { id: (myToken || 'local') + '-' + (++eventCounter) + '-' + Date.now(), msg, type };
+    lastShownEventId = pendingEvent.id;
+}
+
+// Pitch rotation between landscape (1000x550) and portrait (550x1000) so players on
+// different screens (or rejoining from another device) see the same game.
+function convertPos(x, y, angle, toPortrait) {
+    if (toPortrait) return { x: y, y: 1000 - x, angle: angle - Math.PI / 2 };
+    return { x: 1000 - y, y: x, angle: angle + Math.PI / 2 };
+}
+
+function normalizeState(s) {
+    if (typeof s.isPortrait !== 'boolean' || s.isPortrait === isPortrait) return s;
+    const out = { ...s };
+    out.pieces = s.pieces.map(p => { const c = convertPos(p.x, p.y, p.angle || 0, isPortrait); return { ...p, x: c.x, y: c.y, angle: c.angle }; });
+    const b = convertPos(s.ball.x, s.ball.y, 0, isPortrait);
+    out.ball = { ...s.ball, x: b.x, y: b.y };
+    out.isPortrait = isPortrait;
+    return out;
+}
+
+function rotateBoardInPlace() {
+    if (isAnimating || isReplaying) { setTimeout(rotateBoardInPlace, 450); return; }
+    resizeCanvasDisplay();
+    pieces.forEach(p => { const c = convertPos(p.x, p.y, p.angle || 0, isPortrait); p.x = c.x; p.y = c.y; p.angle = c.angle; });
+    const b = convertPos(ball.x, ball.y, 0, isPortrait);
+    ball.x = b.x; ball.y = b.y;
+    selectedPiece = null; selectedAction = null; pointerPos = null; actionHistory = [];
+    updateActionButtons();
+    updateReplayButton();
+}
+
+function applyState(s, isInitial) {
+    s = normalizeState(s);
+    if (typeof s.clockMs === 'number') { clockMs = s.clockMs; clockLast = Date.now(); }
+    suppressNextPush = true;
+    const prevScore = { ...score };
+    const wasMatchOver = matchOver;
+
+    const prevPieces = pieces;
+    const prevBallX = ball.x;
+    const prevBallY = ball.y;
+
+    score = { ...s.score };
+
+    const shouldAnimate = !isInitial && !isAnimating && mode === 'ONLINE';
+
+    selectedPiece = null;
+    selectedAction = null;
+    pointerPos = null;
+
+    if (shouldAnimate) {
+        const prevById = {};
+        prevPieces.forEach(p => { prevById[p.id] = p; });
+
+        const beforeSnap = {
+            pieces: prevPieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+            ball: { x: prevBallX, y: prevBallY, carrierId: ball.carrier ? ball.carrier.id : null }
+        };
+        const afterSnap = {
+            pieces: s.pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+            ball: { x: s.ball.x, y: s.ball.y, carrierId: s.ball.carrierId }
+        };
+
+        pieces = s.pieces.map(pd => {
+            const old = prevById[pd.id];
+            return new Piece(pd.id, pd.team, pd.role, old ? old.x : pd.x, old ? old.y : pd.y, pd.angle);
+        });
+
+        ball.x = prevBallX;
+        ball.y = prevBallY;
+        ball.carrier = null;
+
+        isAnimating = true;
+        animateRemoteUpdate(pieces, s.pieces, s.ball.x, s.ball.y, () => {
+            ball.x = s.ball.x;
+            ball.y = s.ball.y;
+            ball.carrier = s.ball.carrierId ? pieces.find(p => p.id === s.ball.carrierId) : null;
+            isAnimating = false;
+            recordAction('REMOTE', s.lastEvent ? s.lastEvent.msg : "Opponent's last play", beforeSnap, afterSnap);
+            finishApplyState(s, prevScore, wasMatchOver);
+        });
+    } else {
+        pieces = s.pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y, p.angle));
+        ball.x = s.ball.x;
+        ball.y = s.ball.y;
+        ball.carrier = s.ball.carrierId ? pieces.find(p => p.id === s.ball.carrierId) : null;
+        finishApplyState(s, prevScore, wasMatchOver);
+    }
+}
+
+function animateRemoteUpdate(pieceObjs, targetData, targetBallX, targetBallY, callback) {
+    const duration = 380;
+    const startTime = performance.now();
+    const starts = pieceObjs.map(p => ({ x: p.x, y: p.y }));
+    const ballStart = { x: ball.x, y: ball.y };
+    pieceObjs.forEach((p, i) => { if (typeof targetData[i].angle === 'number') p.angle = targetData[i].angle; });
+
+    function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3);
+
+        pieceObjs.forEach((p, i) => {
+            p.x = starts[i].x + (targetData[i].x - starts[i].x) * ease;
+            p.y = starts[i].y + (targetData[i].y - starts[i].y) * ease;
+        });
+        ball.x = ballStart.x + (targetBallX - ballStart.x) * ease;
+        ball.y = ballStart.y + (targetBallY - ballStart.y) * ease;
+
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            pieceObjs.forEach((p, i) => { p.x = targetData[i].x; p.y = targetData[i].y; });
+            callback();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function finishApplyState(s, prevScore, wasMatchOver) {
+    currentTurn = s.currentTurn;
+    matchOver = s.matchOver;
+    timeUp = !!s.timeUp;
+
+    updateActionButtons();
+    updateScoreboard();
+
+    const scoreChanged = (score.USER + score.CPU) > (prevScore.USER + prevScore.CPU);
+
+    // The scorer resets the pitch; once that update lands, close my goal overlay.
+    if (waitingForScorerReset && !scoreChanged) {
+        waitingForScorerReset = false;
+        if (!matchOver) overlay.style.display = 'none';
+    }
+
+    if (!wasMatchOver) {
+        if (matchOver) {
+            showMatchEnd();
+        } else if (scoreChanged) {
+            const scorerIsMe = s.lastScorer === myTeam;
+            showOverlay('GOAL!', scorerIsMe ? 'You scored!' : oppName() + ' scored!');
+            if (!scorerIsMe) {
+                waitingForScorerReset = true;
+                overlayBtn.textContent = 'OK';
+            }
+        }
+    }
+
+    turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : "OPPONENT'S TURN";
+    turnIndicator.style.borderColor = currentTurn === myTeam ? '#ff4d4d' : '#4d94ff';
+    suppressNextPush = false;
+}
+
+async function pushGameState(scorerTeam) {
+    if (mode !== 'ONLINE' || !gameRowId || suppressNextPush) return;
+    window.__lastScorer = scorerTeam || null;
+    const s = serializeState();
+    pendingEvent = null; // consumed
+    const ts = new Date().toISOString();
+    lastSeenUpdatedAt = ts;
+    saveSession();
+    const { error } = await sb.from('games').update({ state: s, updated_at: ts }).eq('id', gameRowId);
+    if (error) showToast('Sync failed - check your connection', 'bad');
+}
+
+function enterGame() {
+    lobbyFrame.style.display = 'none';
+    tableFrame.style.display = 'flex';
+    inLobby = false;
+    opponentLeftHandled = false;
+    if (mode !== 'ONLINE' && !resumingCpu) {
+        initTeams();
+        clockMs = MATCH_DURATION_MS;
+        timeUp = false;
+    }
+    resumingCpu = false;
+    resultRecorded = false;
+    clockLast = Date.now();
+    matchTimerEl.textContent = formatClock(clockMs);
+    matchTimerEl.classList.toggle('low', clockMs <= 30000);
+    resizeCanvasDisplay();
+    updateScoreboard();
+    updateActionButtons();
+    turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : (mode === 'CPU' ? 'CPU THINKING...' : "OPPONENT'S TURN");
+    if (!window.__renderStarted) {
+        window.__renderStarted = true;
+        requestAnimationFrame(render);
+    }
+    if (mode === 'CPU' && currentTurn === TEAM_CPU) setTimeout(playCpuTurn, 800);
+}
+
+function saveSession() {
+    if (!gameRowId || !myToken) return;
+    try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ gameId: gameRowId, room: roomCode, token: myToken, team: myTeam, savedAt: Date.now() }));
+    } catch (e) {}
+}
+function loadSession() {
+    try {
+        const v = JSON.parse(localStorage.getItem(SESSION_KEY));
+        if (!v || !v.token || !v.gameId) return null;
+        if (Date.now() - v.savedAt > SESSION_MAX_AGE) { clearSession(); return null; }
+        return v;
+    } catch (e) { return null; }
+}
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
+
+// CPU match snapshot (saved at every turn boundary)
+function saveCpuGame() {
+    try { localStorage.setItem(CPU_KEY, JSON.stringify({ state: serializeState(), savedAt: Date.now() })); } catch (e) {}
+}
+function clearCpuGame() {
+    try { localStorage.removeItem(CPU_KEY); } catch (e) {}
+    refreshResumeButton();
+}
+function refreshResumeButton() {
+    let ok = false;
+    try {
+        const v = JSON.parse(localStorage.getItem(CPU_KEY));
+        ok = !!(v && v.state && Date.now() - v.savedAt < SESSION_MAX_AGE);
+    } catch (e) {}
+    resumeCpuBtn.style.display = ok ? 'block' : 'none';
+}
+function resumeCpuGame() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CPU_KEY)); } catch (e) {}
+    if (!saved || !saved.state) { refreshResumeButton(); return; }
+    mode = 'CPU';
+    myTeam = TEAM_USER;
+    opponentProfile = null;
+    refreshNames();
+    presenceDot.style.display = 'none';
+    resumingCpu = true;
+    applyState(saved.state, true);
+    enterGame();
+    showToast('Match resumed', 'info');
+}
+
+// ---- Registered player (Supabase `users` table; id doubles as the game player token) ----
+const PROFILE_KEY = 'cantaball_profile_v1';
+let profile = null;           // {id, name, country, gender, synced}
+let opponentProfile = null;   // {name, country, gender} of the other human player
+const registerFrame = document.getElementById('register-frame');
+const COUNTRIES = "Afghanistan,Albania,Algeria,Andorra,Angola,Antigua and Barbuda,Argentina,Armenia,Australia,Austria,Azerbaijan,Bahamas,Bahrain,Bangladesh,Barbados,Belarus,Belgium,Belize,Benin,Bhutan,Bolivia,Bosnia and Herzegovina,Botswana,Brazil,Brunei,Bulgaria,Burkina Faso,Burundi,Cabo Verde,Cambodia,Cameroon,Canada,Central African Republic,Chad,Chile,China,Colombia,Comoros,Congo,Costa Rica,Côte d'Ivoire,Croatia,Cuba,Cyprus,Czechia,DR Congo,Denmark,Djibouti,Dominica,Dominican Republic,Ecuador,Egypt,El Salvador,Equatorial Guinea,Eritrea,Estonia,Eswatini,Ethiopia,Fiji,Finland,France,Gabon,Gambia,Georgia,Germany,Ghana,Greece,Grenada,Guatemala,Guinea,Guinea-Bissau,Guyana,Haiti,Honduras,Hungary,Iceland,India,Indonesia,Iran,Iraq,Ireland,Israel,Italy,Jamaica,Japan,Jordan,Kazakhstan,Kenya,Kiribati,Kosovo,Kuwait,Kyrgyzstan,Laos,Latvia,Lebanon,Lesotho,Liberia,Libya,Liechtenstein,Lithuania,Luxembourg,Madagascar,Malawi,Malaysia,Maldives,Mali,Malta,Marshall Islands,Mauritania,Mauritius,Mexico,Micronesia,Moldova,Monaco,Mongolia,Montenegro,Morocco,Mozambique,Myanmar,Namibia,Nauru,Nepal,Netherlands,New Zealand,Nicaragua,Niger,Nigeria,North Korea,North Macedonia,Norway,Oman,Pakistan,Palau,Palestine,Panama,Papua New Guinea,Paraguay,Peru,Philippines,Poland,Portugal,Qatar,Romania,Russia,Rwanda,Saint Kitts and Nevis,Saint Lucia,Saint Vincent and the Grenadines,Samoa,San Marino,São Tomé and Príncipe,Saudi Arabia,Senegal,Serbia,Seychelles,Sierra Leone,Singapore,Slovakia,Slovenia,Solomon Islands,Somalia,South Africa,South Korea,South Sudan,Spain,Sri Lanka,Sudan,Suriname,Sweden,Switzerland,Syria,Taiwan,Tajikistan,Tanzania,Thailand,Timor-Leste,Togo,Tonga,Trinidad and Tobago,Tunisia,Türkiye,Turkmenistan,Tuvalu,Uganda,Ukraine,United Arab Emirates,United Kingdom,United States,Uruguay,Uzbekistan,Vanuatu,Vatican City,Venezuela,Vietnam,Yemen,Zambia,Zimbabwe,Other".split(',');
+
+function loadProfile() {
+    try {
+        const v = JSON.parse(localStorage.getItem(PROFILE_KEY));
+        if (v && v.id && v.name && v.country && v.gender) return v;
+    } catch (e) {}
+    return null;
+}
+function saveProfileLocal() { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch (e) {} }
+
+async function syncProfile() {
+    if (!sb || !profile) return { ok: false, error: { message: 'no connection' } };
+    const { error } = await sb.from('users').upsert({
+        id: profile.id, name: profile.name, country: profile.country, gender: profile.gender, updated_at: new Date().toISOString()
+    });
+    if (!error) { profile.synced = true; saveProfileLocal(); }
+    return { ok: !error, error };
+}
+
+async function ensureProfile() {
+    if (!profile) { showRegister(false); return false; }
+    if (profile.synced) return true;
+    const r = await syncProfile();
+    if (!r.ok) {
+        setLobbyStatus('Could not save your profile online: ' + (r.error && r.error.message ? r.error.message : 'no connection'));
+        return false;
+    }
+    return true;
+}
+
+function oppName() {
+    if (mode === 'CPU') return 'CPU';
+    return opponentProfile && opponentProfile.name ? opponentProfile.name : 'Opponent';
+}
+
+// Left scoreboard box is always me, right box is always the opponent (colours follow the piece colours).
+function refreshNames() {
+    labelP1.textContent = myDisplayName();
+    labelP1.title = profile ? profile.country : '';
+    labelP2.textContent = mode === 'CPU' ? 'CPU' : (opponentProfile && opponentProfile.name ? opponentProfile.name.toUpperCase() : 'OPPONENT');
+    labelP2.title = opponentProfile && opponentProfile.country ? opponentProfile.country : '';
+    labelP1.style.color = myTeam === TEAM_USER ? '#ff4d4d' : '#4d94ff';
+    labelP2.style.color = myTeam === TEAM_USER ? '#4d94ff' : '#ff4d4d';
+    updateScoreboard();
+}
+
+function loadOpponentProfile(row) {
+    opponentProfile = null;
+    const oppToken = myTeam === TEAM_USER ? row.player_b_token : row.player_a_token;
+    if (!sb || !oppToken) return;
+    sb.from('users').select('name,country,gender').eq('id', oppToken).maybeSingle().then(({ data }) => {
+        if (data && mode === 'ONLINE' && !inLobby) { opponentProfile = data; refreshNames(); }
+    }, () => {});
+}
+
+function buildCountryOptions() {
+    const sel = document.getElementById('reg-country');
+    sel.innerHTML = '';
+    const first = document.createElement('option');
+    first.value = ''; first.textContent = 'Select country';
+    sel.appendChild(first);
+    COUNTRIES.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+}
+
+function showRegister(isEdit) {
+    lobbyFrame.style.display = 'none';
+    registerFrame.style.display = 'block';
+    document.getElementById('register-subtitle').textContent = isEdit ? 'Edit your player profile' : 'Create your player profile to get started';
+    document.getElementById('reg-btn').textContent = isEdit ? 'SAVE PROFILE' : 'START PLAYING';
+    document.getElementById('reg-cancel').style.display = isEdit ? 'inline-block' : 'none';
+    document.getElementById('reg-error').textContent = '';
+    let oldName = '';
+    try { oldName = localStorage.getItem(NAME_KEY) || ''; } catch (e) {}
+    document.getElementById('reg-name').value = isEdit && profile ? profile.name : oldName;
+    document.getElementById('reg-country').value = isEdit && profile ? profile.country : '';
+    document.getElementById('reg-gender').value = isEdit && profile ? profile.gender : '';
+}
+
+function editProfile() { showRegister(true); }
+
+function enterLobbyScreen() {
+    registerFrame.style.display = 'none';
+    lobbyFrame.style.display = 'block';
+    myName = profile ? profile.name : myName;
+    refreshProfile();
+}
+
+async function submitRegistration() {
+    const err = document.getElementById('reg-error');
+    const name = document.getElementById('reg-name').value.trim().replace(/\s+/g, ' ');
+    const country = document.getElementById('reg-country').value;
+    const gender = document.getElementById('reg-gender').value;
+    if (name.length < 2 || name.length > 12) { err.textContent = 'Enter a name between 2 and 12 characters.'; return; }
+    if (!country) { err.textContent = 'Please choose your country.'; return; }
+    if (!gender) { err.textContent = 'Please choose your gender.'; return; }
+    err.textContent = '';
+
+    profile = { id: profile ? profile.id : uuid(), name, country, gender, synced: false };
+    saveProfileLocal();
+    try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
+
+    const btn = document.getElementById('reg-btn');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    const r = await syncProfile();
+    btn.disabled = false;
+    btn.textContent = label;
+
+    enterLobbyScreen();
+    if (!r.ok) showToast('Profile saved on this device - it will sync when you go online', 'info');
+}
+
+function initProfileFlow() {
+    buildCountryOptions();
+    profile = loadProfile();
+    if (profile) { enterLobbyScreen(); tryResumeSession(); }
+    else showRegister(false);
+}
+
+// ---- Player profile (name + lifetime stats, stored on this device) ----
+const NAME_KEY = 'cantaball_name';
+const STATS_KEY = 'cantaball_stats';
+let myName = '';
+let resultRecorded = false;
+
+function myDisplayName() { return (myName || 'YOU').toUpperCase(); }
+function getStats() {
+    try { return Object.assign({ played: 0, won: 0, lost: 0, drawn: 0, goals: 0 }, JSON.parse(localStorage.getItem(STATS_KEY)) || {}); }
+    catch (e) { return { played: 0, won: 0, lost: 0, drawn: 0, goals: 0 }; }
+}
+function refreshProfile() {
+    const st = getStats();
+    document.getElementById('stat-played').textContent = st.played;
+    document.getElementById('stat-won').textContent = st.won;
+    document.getElementById('stat-goals').textContent = st.goals;
+    document.getElementById('stat-rate').textContent = (st.played ? Math.round(st.won / st.played * 100) : 0) + '%';
+    document.getElementById('avatar').textContent = (myName || 'P').charAt(0).toUpperCase();
+    const nd = document.getElementById('player-name-display');
+    nd.textContent = '';
+    nd.appendChild(document.createTextNode(myName || 'Player'));
+    if (profile) { const sm = document.createElement('small'); sm.textContent = profile.country; nd.appendChild(sm); }
+    const ed = document.createElement('span'); ed.className = 'edit-link'; ed.textContent = '✎ Edit'; ed.onclick = editProfile; nd.appendChild(ed);
+}
+function saveName(v) {
+    myName = String(v || '').trim().slice(0, 12);
+    try { localStorage.setItem(NAME_KEY, myName); } catch (e) {}
+    refreshProfile();
+}
+function initProfile() { refreshProfile(); }
+function recordResult(mine, theirs) {
+    if (resultRecorded) return;
+    resultRecorded = true;
+    const sig = (gameRowId || 'cpu') + '|' + score.USER + '-' + score.CPU;
+    if (gameRowId) {   // don't double count when an online result screen is reloaded
+        try { if (localStorage.getItem('cantaball_last_result') === sig) return; localStorage.setItem('cantaball_last_result', sig); } catch (e) {}
+    }
+    const st = getStats();
+    st.played++; st.goals += mine;
+    if (mine > theirs) st.won++; else if (mine < theirs) st.lost++; else st.drawn++;
+    try { localStorage.setItem(STATS_KEY, JSON.stringify(st)); } catch (e) {}
+    refreshProfile();
+}
+
+// Rejoin an online match from localStorage (or ?room=&pid= in the URL).
+async function tryResumeSession() {
+    const params = new URLSearchParams(window.location.search);
+    let sess = loadSession();
+    if (!sess && params.get('room') && params.get('pid')) sess = { room: params.get('room'), token: params.get('pid') };
+    if (!sess || !requireSupabase()) return false;
+
+    myToken = sess.token;
+    setLobbyStatus('Reconnecting to your match...');
+
+    let q = sb.from('games').select('*');
+    q = sess.gameId ? q.eq('id', sess.gameId) : q.eq('room_code', sess.room);
+    const { data: row } = await q.maybeSingle();
+
+    const fail = (msg) => { clearSession(); myToken = null; setLobbyStatus(msg); history.replaceState(null, '', window.location.pathname); return false; };
+    if (!row) return fail('Your last match is no longer available.');
+    if (row.player_a_token !== sess.token && row.player_b_token !== sess.token) return fail('Your last match is no longer available.');
+    if (row.state && row.state.leftBy) return fail('Your last opponent left the match.');
+
+    gameRowId = row.id;
+    roomCode = row.room_code || sess.room || null;
+    myTeam = row.player_a_token === sess.token ? TEAM_USER : TEAM_CPU;
+
+    if (row.status === 'waiting') {
+        roomCodeBox.textContent = roomCode || '';
+        roomCodeBox.style.display = 'block';
+        lobbyCancel.style.display = 'inline-block';
+        setLobbyStatus('Waiting for opponent to join with this code...');
+        subscribeWaitingForOpponent();
+        return true;
+    }
+
+    beginOnlineMatch(row);
+    showToast('Rejoined your match', 'good');
+    return true;
+}
+
+function updateCanvasOrientation() {
+    isPortrait = window.innerWidth <= 600 && window.innerHeight > window.innerWidth;
+    if (isPortrait) { canvas.width = 550; canvas.height = 1000; }
+    else { canvas.width = 1000; canvas.height = 550; }
+}
+
+function resizeCanvasDisplay() {
+    const availW = canvasContainer.clientWidth || window.innerWidth;
+    const availH = window.innerHeight * 0.65;
+    const aspect = canvas.width / canvas.height;
+    let dispW = availW;
+    let dispH = dispW / aspect;
+    if (dispH > availH) { dispH = availH; dispW = dispH * aspect; }
+    canvas.style.width = Math.round(dispW) + 'px';
+    canvas.style.height = Math.round(dispH) + 'px';
+}
+
+function drawStar(cx, cy, outer, inner) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+        const r = i % 2 === 0 ? outer : inner;
+        const a = -Math.PI / 2 + i * Math.PI / 5;
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+}
+
+class Piece {
+    constructor(id, team, role, x, y, angle) {
+        this.id = id;
+        this.team = team;
+        this.role = role;
+        this.x = x;
+        this.y = y;
+        this.angle = (typeof angle === 'number') ? angle : 0; // facing direction (radians)
+    }
+
+    draw() {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 4;
+
+        if (selectedPiece === this) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, PieceRadius + 7, 0, Math.PI * 2);
+            ctx.strokeStyle = selectedAction === 'SHOOT' ? '#ff0055' : (selectedAction === 'PASS' ? '#ffcc00' : '#00ffff');
+            ctx.lineWidth = 3;
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Protruding front (the "nose") - shows which way the player faces.
+        const a = this.angle || 0;
+        ctx.beginPath();
+        ctx.moveTo(this.x + Math.cos(a) * (PieceRadius + 10), this.y + Math.sin(a) * (PieceRadius + 10));
+        ctx.lineTo(this.x + Math.cos(a - 0.65) * (PieceRadius - 2), this.y + Math.sin(a - 0.65) * (PieceRadius - 2));
+        ctx.lineTo(this.x + Math.cos(a + 0.65) * (PieceRadius - 2), this.y + Math.sin(a + 0.65) * (PieceRadius - 2));
+        ctx.closePath();
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, PieceRadius, 0, Math.PI * 2);
+        const colorMain = this.team === TEAM_USER ? '#d32f2f' : '#1976d2';
+        const colorLight = this.team === TEAM_USER ? '#ef5350' : '#42a5f5';
+        const grad = ctx.createRadialGradient(this.x - 4, this.y - 4, 2, this.x, this.y, PieceRadius);
+        grad.addColorStop(0, colorLight);
+        grad.addColorStop(1, colorMain);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        const isStar = this.role === 'STAR';
+        ctx.strokeStyle = isStar ? '#ffd700' : '#222';
+        ctx.lineWidth = isStar ? 3 : 2;
+        ctx.stroke();
+
+        if (isStar) {
+            drawStar(this.x, this.y, 10, 4.5);
+            ctx.fillStyle = '#ffd700';
+            ctx.fill();
+            ctx.strokeStyle = '#7a5a00';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+}
+
+function initTeams() {
+    updateCanvasOrientation();
+    resizeCanvasDisplay();
+    const midX = canvas.width / 2;
+    const midY = canvas.height / 2;
+
+    // No goalkeepers: all 5 players per side are normal field players.
+    if (isPortrait) {
+        pieces = [
+            new Piece(1, TEAM_USER, 'FIELD', midX, canvas.height - 110),
+            new Piece(2, TEAM_USER, 'FIELD', midX - 120, canvas.height - 200),
+            new Piece(3, TEAM_USER, 'FIELD', midX + 120, canvas.height - 200),
+            new Piece(4, TEAM_USER, 'STAR', midX, canvas.height - 320),
+            new Piece(5, TEAM_USER, 'FIELD', midX, canvas.height - 420),
+
+            new Piece(6, TEAM_CPU, 'FIELD', midX, 110),
+            new Piece(7, TEAM_CPU, 'FIELD', midX - 120, 200),
+            new Piece(8, TEAM_CPU, 'FIELD', midX + 120, 200),
+            new Piece(9, TEAM_CPU, 'STAR', midX, 320),
+            new Piece(10, TEAM_CPU, 'FIELD', midX, 420)
+        ];
+    } else {
+        pieces = [
+            new Piece(1, TEAM_USER, 'FIELD', 110, midY),
+            new Piece(2, TEAM_USER, 'FIELD', 200, midY - 120),
+            new Piece(3, TEAM_USER, 'FIELD', 200, midY + 120),
+            new Piece(4, TEAM_USER, 'STAR', 320, midY),
+            new Piece(5, TEAM_USER, 'FIELD', 420, midY),
+
+            new Piece(6, TEAM_CPU, 'FIELD', canvas.width - 110, midY),
+            new Piece(7, TEAM_CPU, 'FIELD', canvas.width - 200, midY - 120),
+            new Piece(8, TEAM_CPU, 'FIELD', canvas.width - 200, midY + 120),
+            new Piece(9, TEAM_CPU, 'STAR', canvas.width - 320, midY),
+            new Piece(10, TEAM_CPU, 'FIELD', canvas.width - 420, midY)
+        ];
+    }
+
+    // Everyone starts facing the goal they attack.
+    pieces.forEach(p => {
+        p.angle = isPortrait
+            ? (p.team === TEAM_USER ? -Math.PI / 2 : Math.PI / 2)
+            : (p.team === TEAM_USER ? 0 : Math.PI);
+    });
+
+    resetBallToCenter();
+}
+
+function resetBallToCenter() {
+    ball.x = canvas.width / 2;
+    ball.y = canvas.height / 2;
+    ball.carrier = null;
+    checkBallPossession();
+}
+
+// Goal kick restart (no keeper): the defending player nearest their own goal collects the ball.
+function resetGoalKick(defendingTeam) {
+    let goalX, goalY;
+    if (isPortrait) {
+        goalY = defendingTeam === TEAM_USER ? canvas.height - GoalWidth - 10 : GoalWidth + 10;
+        goalX = canvas.width / 2;
+    } else {
+        goalX = defendingTeam === TEAM_USER ? GoalWidth + 10 : canvas.width - GoalWidth - 10;
+        goalY = canvas.height / 2;
+    }
+
+    let taker = null;
+    let best = Infinity;
+    pieces.filter(p => p.team === defendingTeam).forEach(p => {
+        const d = Math.hypot(p.x - goalX, p.y - goalY);
+        if (d < best) { best = d; taker = p; }
+    });
+
+    if (taker) {
+        ball.x = taker.x;
+        ball.y = taker.y;
+        ball.carrier = taker;
+    } else {
+        ball.x = goalX;
+        ball.y = goalY;
+        ball.carrier = null;
+        checkBallPossession();
+    }
+}
+
+function checkBallPossession() {
+    let closest = null;
+    let minDist = PieceRadius + BallRadius + 5;
+    pieces.forEach(p => {
+        const d = Math.hypot(p.x - ball.x, p.y - ball.y);
+        if (d < minDist) { minDist = d; closest = p; }
+    });
+    ball.carrier = closest;
+}
+
+// Normal players must be within ShootRange of the goal; the STAR player can shoot from anywhere.
+function canShootFrom(piece) {
+    if (piece.role === 'STAR') return true;
+    const g = getEnemyGoalCenter(piece.team);
+    return Math.hypot(g.x - piece.x, g.y - piece.y) <= ShootRange;
+}
+
+function getEnemyGoalCenter(team) {
+    if (isPortrait) return { x: canvas.width / 2, y: team === TEAM_USER ? 0 : canvas.height };
+    return { x: team === TEAM_USER ? canvas.width : 0, y: canvas.height / 2 };
+}
+
+// ---- Facing / tackle helpers ----
+function angleDiff(a, b) {
+    let d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d);
+}
+
+// Which side of the ball carrier is a tackler coming from? ('FRONT' | 'SIDE' | 'BACK')
+function tackleSide(carrier, fromX, fromY) {
+    const approach = Math.atan2(fromY - carrier.y, fromX - carrier.x);
+    const d = angleDiff(approach, carrier.angle || 0);
+    if (d <= FRONT_HALF_ANGLE) return 'FRONT';
+    if (d >= BACK_HALF_ANGLE) return 'BACK';
+    return 'SIDE';
+}
+
+function setAction(action) {
+    if (currentTurn !== myTeam || !selectedPiece || isAnimating || isReplaying) return;
+
+    if (action === 'SHOOT') {
+        if (ball.carrier !== selectedPiece) return;
+        if (!canShootFrom(selectedPiece)) { showLog("Too far to shoot!"); return; }
+    }
+
+    if (action === 'PASS' && ball.carrier !== selectedPiece) {
+        showLog("Must possess ball to pass!");
+        return;
+    }
+
+    selectedAction = action;
+    updateActionButtons();
+}
+
+function setTargetZone(zone) {
+    if (currentTurn !== myTeam || isAnimating || isReplaying) return;
+    targetZone = zone;
+    targetLeft.classList.remove('active-target');
+    targetCenter.classList.remove('active-target');
+    targetRight.classList.remove('active-target');
+    if (zone === 'LEFT') targetLeft.classList.add('active-target');
+    if (zone === 'CENTER') targetCenter.classList.add('active-target');
+    if (zone === 'RIGHT') targetRight.classList.add('active-target');
+}
+
+function updateActionButtons() {
+    btnMove.className = 'action-btn';
+    btnPass.className = 'action-btn';
+    btnShoot.className = 'action-btn';
+    targetSelector.style.display = 'none';
+
+    if (currentTurn === myTeam && selectedPiece && !isAnimating && !isReplaying) {
+        btnMove.classList.add('active');
+        if (selectedAction === 'MOVE') btnMove.classList.add('selected');
+
+        if (ball.carrier === selectedPiece) {
+            btnPass.classList.add('active');
+            if (selectedAction === 'PASS') btnPass.classList.add('selected');
+
+            if (canShootFrom(selectedPiece)) {
+                btnShoot.classList.add('active');
+                if (selectedAction === 'SHOOT') {
+                    btnShoot.classList.add('selected');
+                    targetSelector.style.display = 'flex';
+                }
+            }
+        }
+    }
+    updateReplayButton();
+}
+
+function switchTurn(nextTeam) {
+    selectedPiece = null;
+    selectedAction = null;
+    pointerPos = null;
+    updateActionButtons();
+
+    if (score.USER >= WIN_SCORE || score.CPU >= WIN_SCORE) {
+        matchOver = true;
+        showMatchEnd();
+        pushGameState();
+        return;
+    }
+
+    currentTurn = nextTeam ? nextTeam : (currentTurn === TEAM_USER ? TEAM_CPU : TEAM_USER);
+    turnIndicator.textContent = currentTurn === myTeam ? "YOUR TURN" : (mode === 'CPU' ? "CPU THINKING..." : "OPPONENT'S TURN");
+    turnIndicator.style.borderColor = currentTurn === myTeam ? "#ff4d4d" : "#4d94ff";
+
+    if (mode === 'CPU') saveCpuGame();
+    if (mode === 'CPU' && currentTurn === TEAM_CPU) {
+        setTimeout(playCpuTurn, 800);
+    } else if (mode === 'ONLINE') {
+        pushGameState();
+    }
+}
+
+function getCanvasCoordinates(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    let clientX = e.clientX;
+    let clientY = e.clientY;
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+    }
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+}
+
+function handlePointerInput(e) {
+    if (currentTurn !== myTeam || isAnimating || isReplaying || matchOver) return;
+
+    const pos = getCanvasCoordinates(e);
+    const clickX = pos.x;
+    const clickY = pos.y;
+
+    // In PASS mode with the ball, tapping a teammate completes the pass.
+    if (selectedAction === 'PASS' && selectedPiece && ball.carrier === selectedPiece) {
+        let passTarget = null;
+        let minTeammateDist = Infinity;
+        pieces.filter(p => p.team === myTeam && p !== selectedPiece).forEach(teammate => {
+            const d = Math.hypot(teammate.x - clickX, teammate.y - clickY);
+            if (d < TouchHitboxRadius + 10 && d < minTeammateDist) { minTeammateDist = d; passTarget = teammate; }
+        });
+        if (passTarget) { handlePassAction(selectedPiece, passTarget); return; }
+    }
+
+    const clickedPiece = pieces.find(p => p.team === myTeam && Math.hypot(p.x - clickX, p.y - clickY) <= TouchHitboxRadius);
+    if (clickedPiece) {
+        selectedPiece = clickedPiece;
+        selectedAction = 'MOVE';
+        updateActionButtons();
+        if (clickedPiece.role === 'STAR' && ball.carrier === clickedPiece) showLog('⭐ Star player: can shoot from anywhere!');
+        return;
+    }
+
+    if (selectedPiece) {
+        if (selectedAction === 'MOVE') handleMoveAction(selectedPiece, clickX, clickY);
+        else if (selectedAction === 'SHOOT') showLog('Pick LEFT / CENTER / RIGHT, then press TAKE SHOT');
+        else if (selectedAction === 'PASS') showLog("Tap a teammate to complete pass!");
+    }
+}
+
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); pointerPos = getCanvasCoordinates(e); }, { passive: false });
+canvas.addEventListener('touchmove', (e) => { e.preventDefault(); pointerPos = getCanvasCoordinates(e); }, { passive: false });
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); handlePointerInput(e); pointerPos = null; }, { passive: false });
+canvas.addEventListener('click', (e) => { handlePointerInput(e); });
+
+function resolveMovementWithCollisions(piece, destX, destY) {
+    destX = Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, destX));
+    destY = Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, destY));
+
+    const totalDist = Math.hypot(destX - piece.x, destY - piece.y);
+    if (totalDist > MoveRadius) {
+        const angle = Math.atan2(destY - piece.y, destX - piece.x);
+        destX = piece.x + Math.cos(angle) * MoveRadius;
+        destY = piece.y + Math.sin(angle) * MoveRadius;
+    }
+
+    const dx = destX - piece.x;
+    const dy = destY - piece.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance === 0) return { finalX: piece.x, finalY: piece.y, hitPiece: null };
+
+    const dirX = dx / distance;
+    const dirY = dy / distance;
+    const minSpace = PieceRadius * 2 + 2;
+
+    let closestHitDist = distance;
+    let hitPiece = null;
+
+    pieces.forEach(other => {
+        if (other === piece) return;
+        const ox = other.x - piece.x;
+        const oy = other.y - piece.y;
+        const proj = ox * dirX + oy * dirY;
+
+        if (proj > 0 && proj < closestHitDist + minSpace) {
+            const perpDistSq = (ox * ox + oy * oy) - (proj * proj);
+            if (perpDistSq < minSpace * minSpace) {
+                const hitOffset = Math.sqrt(Math.max(0, (minSpace * minSpace) - perpDistSq));
+                const actualTravel = proj - hitOffset;
+                if (actualTravel < closestHitDist) {
+                    closestHitDist = Math.max(0, actualTravel);
+                    hitPiece = other;
+                }
+            }
+        }
+    });
+
+    return { finalX: piece.x + dirX * closestHitDist, finalY: piece.y + dirY * closestHitDist, hitPiece };
+}
+
+const FOUL_CLEAR_RADIUS = 160;
+
+// After a foul the fouled player keeps the ball and every opposing player inside the
+// clear radius is moved back (and turned to face the ball) so the restart is unobstructed.
+function restartAfterFoul(carrier, done) {
+    const cw = canvas.width, ch = canvas.height;
+    const clamp = (v, max) => Math.max(PieceRadius, Math.min(max - PieceRadius, v));
+    const targets = pieces.map(p => ({ id: p.id, x: p.x, y: p.y, angle: p.angle }));
+    const movers = [];
+
+    pieces.forEach((p, i) => {
+        if (p.team === carrier.team) return;
+        let dx = p.x - carrier.x, dy = p.y - carrier.y;
+        let d = Math.hypot(dx, dy);
+        if (d >= FOUL_CLEAR_RADIUS) return;
+        if (d < 1) { dx = -Math.cos(carrier.angle); dy = -Math.sin(carrier.angle); d = 1; }
+        targets[i].x = clamp(carrier.x + (dx / d) * FOUL_CLEAR_RADIUS, cw);
+        targets[i].y = clamp(carrier.y + (dy / d) * FOUL_CLEAR_RADIUS, ch);
+        movers.push(i);
+    });
+
+    // keep pushed players from ending up stacked on top of anyone
+    const minGap = PieceRadius * 2 + 6;
+    for (let iter = 0; iter < 6; iter++) {
+        movers.forEach(i => {
+            targets.forEach((o, j) => {
+                if (i === j) return;
+                let dx = targets[i].x - o.x, dy = targets[i].y - o.y;
+                let d = Math.hypot(dx, dy);
+                if (d < minGap) {
+                    if (d < 0.01) { dx = 1; dy = 0; d = 1; }
+                    targets[i].x = clamp(targets[i].x + (dx / d) * (minGap - d), cw);
+                    targets[i].y = clamp(targets[i].y + (dy / d) * (minGap - d), ch);
+                }
+            });
+        });
+    }
+
+    movers.forEach(i => { targets[i].angle = Math.atan2(carrier.y - targets[i].y, carrier.x - targets[i].x); });
+
+    if (movers.length === 0) { done(); return; }
+    isAnimating = true;
+    animateRemoteUpdate(pieces, targets, ball.x, ball.y, () => { isAnimating = false; done(); });
+}
+
+function handleMoveAction(piece, targetX, targetY) {
+    const beforeSnap = snapshotBoard();
+    const startX = piece.x;
+    const startY = piece.y;
+    const moveRes = resolveMovementWithCollisions(piece, targetX, targetY);
+
+    // The player turns to face the direction they run.
+    if (Math.hypot(moveRes.finalX - startX, moveRes.finalY - startY) > 1) {
+        piece.angle = Math.atan2(moveRes.finalY - startY, moveRes.finalX - startX);
+    }
+
+    animateMovement(piece, moveRes.finalX, moveRes.finalY, () => {
+        let logMsg = null;
+        let logType = null;
+        let foulCarrier = null;
+        const hit = moveRes.hitPiece;
+
+        if (hit) {
+            if (ball.carrier === hit && hit.team !== piece.team) {
+                // Only a tackle from the FRONT wins the ball. Side / back = foul, carrier keeps it.
+                const side = tackleSide(hit, startX, startY);
+                if (side === 'FRONT') {
+                    ball.carrier = piece;
+                    ball.x = piece.x;
+                    ball.y = piece.y;
+                    logMsg = "Clean Tackle! Ball won";
+                    logType = 'good';
+                } else {
+                    logMsg = side === 'BACK' ? "FOUL! Tackle from behind - free kick" : "FOUL! Tackle from the side - free kick";
+                    logType = 'foul';
+                    foulCarrier = hit;
+                }
+            } else if (!ball.carrier && Math.hypot(piece.x - ball.x, piece.y - ball.y) < PieceRadius + BallRadius + 15) {
+                ball.carrier = piece;
+                logMsg = "Ball Recovered!";
+            } else {
+                logMsg = "Blocked by Player!";
+            }
+        } else if (!ball.carrier) {
+            if (Math.hypot(piece.x - ball.x, piece.y - ball.y) < PieceRadius + BallRadius + 15) {
+                ball.carrier = piece;
+                logMsg = "Ball Recovered!";
+            }
+        }
+
+        if (logMsg) logAndToast(logMsg, logType);
+
+        if (foulCarrier) {
+            // fouled player keeps the ball; opposition is cleared away, then the fouled team plays on
+            restartAfterFoul(foulCarrier, () => {
+                recordAction('MOVE', logMsg, beforeSnap);
+                switchTurn();
+            });
+            return;
+        }
+
+        recordAction('MOVE', logMsg || 'Move', beforeSnap);
+        switchTurn();
+    });
+}
+
+function handlePassAction(passer, receiver) {
+    const beforeSnap = snapshotBoard();
+    passer.angle = Math.atan2(receiver.y - passer.y, receiver.x - passer.x);
+    isAnimating = true;
+    ball.carrier = null;
+
+    let interceptedBy = null;
+    const enemyTeam = passer.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+
+    pieces.filter(p => p.team === enemyTeam).forEach(enemy => {
+        const distToLane = distToSegment({ x: enemy.x, y: enemy.y }, { x: passer.x, y: passer.y }, { x: receiver.x, y: receiver.y });
+        if (distToLane < PieceRadius + 10 && Math.random() < 0.6) interceptedBy = enemy;
+    });
+
+    const targetPos = interceptedBy ? { x: interceptedBy.x, y: interceptedBy.y } : { x: receiver.x, y: receiver.y };
+
+    animateBall(targetPos.x, targetPos.y, () => {
+        let logMsg;
+        if (interceptedBy) { ball.carrier = interceptedBy; logMsg = "Pass Intercepted!"; }
+        else { ball.carrier = receiver; logMsg = "Pass Complete!"; }
+        logAndToast(logMsg);
+        isAnimating = false;
+        recordAction('PASS', logMsg, beforeSnap);
+        switchTurn();
+    });
+}
+
+const SHOT_BLOCK_RADIUS = PieceRadius + 12;
+
+// Where a shot aimed at LEFT / CENTER / RIGHT ends up inside the goal being attacked by `team`.
+function getShotTarget(team, zone) {
+    const GY = isPortrait ? canvas.width / 2 - GoalHeight / 2 : canvas.height / 2 - GoalHeight / 2;
+    const off = GoalHeight / 4;
+    const pos = zone === 'LEFT' ? GY + off : (zone === 'RIGHT' ? GY + GoalHeight - off : GY + GoalHeight / 2);
+    if (isPortrait) return { x: pos, y: team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth };
+    return { x: team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth, y: pos };
+}
+
+// The first opposing player standing on the shot line (in front of the shooter), or null.
+// The aiming line and the real shot both use this, so what you see is what happens.
+function findShotBlocker(shooter, tx, ty) {
+    const dx = tx - shooter.x, dy = ty - shooter.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return null;
+    let best = null, bestT = Infinity;
+    pieces.forEach(p => {
+        if (p.team === shooter.team) return;
+        const t = ((p.x - shooter.x) * dx + (p.y - shooter.y) * dy) / len2;
+        if (t <= 0 || t > 1) return;
+        const px = shooter.x + t * dx, py = shooter.y + t * dy;
+        if (Math.hypot(p.x - px, p.y - py) <= SHOT_BLOCK_RADIUS && t < bestT) { best = p; bestT = t; }
+    });
+    return best;
+}
+
+// Fired by the TAKE SHOT button (not by tapping the pitch).
+function takeShot() {
+    if (currentTurn !== myTeam || !selectedPiece || selectedAction !== 'SHOOT' || ball.carrier !== selectedPiece) return;
+    if (isAnimating || isReplaying || matchOver) return;
+    if (!canShootFrom(selectedPiece)) { showLog('Too far to shoot!'); return; }
+    handleShootAction(selectedPiece, targetZone);
+}
+
+// The ball travels the aimed line exactly: it scores unless a defender is standing on that line.
+function handleShootAction(shooter, zone = 'CENTER') {
+    const beforeSnap = snapshotBoard();
+    isAnimating = true;
+    ball.carrier = null;
+
+    const enemyTeam = shooter.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+    const target = getShotTarget(shooter.team, zone);
+    shooter.angle = Math.atan2(target.y - shooter.y, target.x - shooter.x);
+
+    const blocker = findShotBlocker(shooter, target.x, target.y);
+
+    if (blocker) {
+        animateBall(blocker.x, blocker.y, () => {
+            ball.carrier = blocker;
+            logAndToast("SHOT BLOCKED!");
+            isAnimating = false;
+            recordAction('SHOOT', 'Shot blocked!', beforeSnap);
+            switchTurn(enemyTeam);
+        });
+        return;
+    }
+
+    animateBall(target.x, target.y, () => {
+        score[shooter.team]++;
+        updateScoreboard();
+        const scorerLabel = shooter.team === myTeam ? "You" : oppName();
+        recordAction('GOAL', `${scorerLabel} scored!`, beforeSnap);
+        showOverlay("GOAL!", `${scorerLabel} scored!`);
+        isAnimating = false;
+        if (mode === 'ONLINE') pushGameState(shooter.team);
+    });
+}
+
+function playCpuTurn() {
+    if (matchOver || mode !== 'CPU' || inLobby) return;
+
+    const cpuPieces = pieces.filter(p => p.team === TEAM_CPU);
+    const ballCarrier = ball.carrier;
+
+    if (ballCarrier && ballCarrier.team === TEAM_CPU) {
+        const goal = getEnemyGoalCenter(TEAM_CPU);
+        const distToUserGoal = Math.hypot(goal.x - ballCarrier.x, goal.y - ballCarrier.y);
+
+        if (distToUserGoal <= ShootRange || (ballCarrier.role === 'STAR' && Math.random() < 0.4)) {
+            const cpuZones = ['LEFT', 'CENTER', 'RIGHT'];
+            handleShootAction(ballCarrier, cpuZones[Math.floor(Math.random() * cpuZones.length)]);
+            return;
+        }
+
+        // Dribble toward the goal being attacked.
+        const ang = Math.atan2(goal.y - ballCarrier.y, goal.x - ballCarrier.x);
+        const jitter = (Math.random() - 0.5) * 0.6;
+        const targetX = ballCarrier.x + Math.cos(ang + jitter) * (MoveRadius - 20);
+        const targetY = ballCarrier.y + Math.sin(ang + jitter) * (MoveRadius - 20);
+        handleMoveAction(ballCarrier, targetX, targetY);
+        return;
+    }
+
+    let activePiece = null;
+    let minDist = Infinity;
+    cpuPieces.forEach(p => {
+        const d = Math.hypot(p.x - ball.x, p.y - ball.y);
+        if (d < minDist) { minDist = d; activePiece = p; }
+    });
+    if (!activePiece) activePiece = cpuPieces[0];
+
+    // To win the ball legally the CPU must approach the carrier from the front.
+    if (ballCarrier && ballCarrier.team === TEAM_USER && tackleSide(ballCarrier, activePiece.x, activePiece.y) !== 'FRONT') {
+        const fx = ballCarrier.x + Math.cos(ballCarrier.angle) * 75;
+        const fy = ballCarrier.y + Math.sin(ballCarrier.angle) * 75;
+        handleMoveAction(activePiece, fx, fy);
+        return;
+    }
+
+    handleMoveAction(activePiece, ball.x, ball.y);
+}
+
+function animateMovement(piece, targetX, targetY, callback) {
+    isAnimating = true;
+    const startX = piece.x;
+    const startY = piece.y;
+    const duration = 380;
+    const startTime = performance.now();
+
+    function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3);
+
+        piece.x = startX + (targetX - startX) * ease;
+        piece.y = startY + (targetY - startY) * ease;
+        if (ball.carrier === piece) { ball.x = piece.x; ball.y = piece.y; }
+
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            piece.x = targetX;
+            piece.y = targetY;
+            if (ball.carrier === piece) { ball.x = piece.x; ball.y = piece.y; }
+            isAnimating = false;
+            callback();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function animateBall(targetX, targetY, callback) {
+    const startX = ball.x;
+    const startY = ball.y;
+    const duration = 350;
+    const startTime = performance.now();
+
+    function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        ball.x = startX + (targetX - startX) * progress;
+        ball.y = startY + (targetY - startY) * progress;
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            ball.x = targetX;
+            ball.y = targetY;
+            callback();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function distToSegment(p, v, w) {
+    const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+    if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+}
+
+function drawPitch() {
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 3;
+
+    if (isPortrait) {
+        const GY = canvas.width / 2 - GoalHeight / 2;
+        ctx.beginPath(); ctx.moveTo(0, canvas.height / 2); ctx.lineTo(canvas.width, canvas.height / 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(canvas.width / 2, canvas.height / 2, 75, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeRect(GY - 30, 0, GoalHeight + 60, 150);
+        ctx.strokeRect(GY - 30, canvas.height - 150, GoalHeight + 60, 150);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(GY, 0, GoalHeight, GoalWidth);
+        ctx.fillRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
+        ctx.strokeStyle = '#fbc02d';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(GY, 0, GoalHeight, GoalWidth);
+        ctx.strokeRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
+    } else {
+        const GY = canvas.height / 2 - GoalHeight / 2;
+        ctx.beginPath(); ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.arc(canvas.width / 2, canvas.height / 2, 75, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeRect(0, GY - 30, 150, GoalHeight + 60);
+        ctx.strokeRect(canvas.width - 150, GY - 30, 150, GoalHeight + 60);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(0, GY, GoalWidth, GoalHeight);
+        ctx.fillRect(canvas.width - GoalWidth, GY, GoalWidth, GoalHeight);
+        ctx.strokeStyle = '#fbc02d';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(0, GY, GoalWidth, GoalHeight);
+        ctx.strokeRect(canvas.width - GoalWidth, GY, GoalWidth, GoalHeight);
+    }
+}
+
+function drawMovementRadius() {
+    if (currentTurn === myTeam && selectedPiece && selectedAction === 'MOVE' && !isAnimating) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(selectedPiece.x, selectedPiece.y, MoveRadius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.08)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.stroke();
+
+        if (pointerPos) {
+            const moveRes = resolveMovementWithCollisions(selectedPiece, pointerPos.x, pointerPos.y);
+            ctx.beginPath();
+            ctx.moveTo(selectedPiece.x, selectedPiece.y);
+            ctx.lineTo(moveRes.finalX, moveRes.finalY);
+            ctx.strokeStyle = '#00ffff';
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(moveRes.finalX, moveRes.finalY, PieceRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+// Faint wedge in front of the opposing ball carrier = the only zone you can tackle from.
+function drawTackleZone() {
+    if (currentTurn !== myTeam || isAnimating || isReplaying || matchOver) return;
+    const c = ball.carrier;
+    if (!c || c.team === myTeam) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.arc(c.x, c.y, 110, c.angle - FRONT_HALF_ANGLE, c.angle + FRONT_HALF_ANGLE);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawPassIndicators() {
+    if (currentTurn === myTeam && selectedPiece && selectedAction === 'PASS' && ball.carrier === selectedPiece && !isAnimating) {
+        const teammates = pieces.filter(p => p.team === myTeam && p !== selectedPiece);
+        const enemies = pieces.filter(p => p.team !== myTeam);
+
+        teammates.forEach(teammate => {
+            let isBlocked = false;
+            enemies.forEach(enemy => {
+                const distToLane = distToSegment({ x: enemy.x, y: enemy.y }, { x: selectedPiece.x, y: selectedPiece.y }, { x: teammate.x, y: teammate.y });
+                if (distToLane < PieceRadius + 10) isBlocked = true;
+            });
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(selectedPiece.x, selectedPiece.y);
+            ctx.lineTo(teammate.x, teammate.y);
+            ctx.lineWidth = 3;
+            if (isBlocked) { ctx.strokeStyle = 'rgba(255, 77, 77, 0.7)'; ctx.setLineDash([4, 6]); }
+            else { ctx.strokeStyle = 'rgba(255, 204, 0, 0.8)'; ctx.setLineDash([6, 4]); }
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(teammate.x, teammate.y, PieceRadius + 8, 0, Math.PI * 2);
+            ctx.strokeStyle = isBlocked ? '#ff4d4d' : '#ffcc00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.stroke();
+            ctx.restore();
+        });
+    }
+}
+
+function drawShootIndicator() {
+    if (currentTurn === myTeam && selectedPiece && selectedAction === 'SHOOT' && ball.carrier === selectedPiece && !isAnimating) {
+        const target = getShotTarget(selectedPiece.team, targetZone);
+        const blocker = findShotBlocker(selectedPiece, target.x, target.y);
+        const endX = blocker ? blocker.x : target.x;
+        const endY = blocker ? blocker.y : target.y;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(selectedPiece.x, selectedPiece.y);
+        ctx.lineTo(endX, endY);
+        ctx.lineWidth = 3;
+        if (blocker) { ctx.strokeStyle = 'rgba(255, 77, 77, 0.85)'; ctx.setLineDash([4, 6]); }
+        else { ctx.strokeStyle = 'rgba(255, 0, 85, 0.9)'; ctx.setLineDash([6, 4]); }
+        ctx.stroke();
+
+        // Goal-mouth target marker (always shown) and a ring on the defender who would block it.
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, 10, 0, Math.PI * 2);
+        ctx.strokeStyle = blocker ? 'rgba(255, 77, 77, 0.6)' : '#ff0055';
+        ctx.stroke();
+        if (blocker) {
+            ctx.beginPath();
+            ctx.arc(blocker.x, blocker.y, PieceRadius + 8, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ff4d4d';
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+function drawBall() {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, BallRadius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+}
+
+function formatClock(ms) {
+    const t = Math.ceil(ms / 1000);
+    return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+}
+
+function tickClock() {
+    const now = Date.now();
+    let dt = now - clockLast;
+    clockLast = now;
+    if (inLobby || matchOver) return;
+    if (overlay.style.display === 'flex') return;   // paused while a goal/result overlay is up
+    if (mode === 'CPU') dt = Math.min(dt, 1000);    // a backgrounded CPU game shouldn't burn the clock
+    clockMs = Math.max(0, clockMs - dt);
+    matchTimerEl.textContent = formatClock(clockMs);
+    matchTimerEl.classList.toggle('low', clockMs <= 30000);
+    if (clockMs <= 0 && !isAnimating) endMatchByTime();
+}
+
+function endMatchByTime() {
+    if (matchOver) return;
+    matchOver = true;
+    timeUp = true;
+    selectedPiece = null;
+    selectedAction = null;
+    pointerPos = null;
+    updateActionButtons();
+    showMatchEnd();
+    // Player A is the authority for the final whistle; B ends locally and gets A's state too.
+    if (mode === 'ONLINE' && myTeam === TEAM_USER) pushGameState();
+}
+
+function render() {
+    tickClock();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawPitch();
+    drawTackleZone();
+    drawMovementRadius();
+    drawPassIndicators();
+    drawShootIndicator();
+    pieces.forEach(p => p.draw());
+    drawBall();
+    requestAnimationFrame(render);
+}
+
+function updateScoreboard() {
+    scoreP1Display.textContent = myTeam === TEAM_USER ? score.USER : score.CPU;
+    scoreP2Display.textContent = myTeam === TEAM_USER ? score.CPU : score.USER;
+}
+
+// Small in-pitch hint pill (local hints only). Timer is reset so overlapping hints don't hide each other early.
+function showLog(msg) {
+    logText.textContent = msg;
+    logText.style.display = 'block';
+    clearTimeout(logTimer);
+    logTimer = setTimeout(() => { logText.style.display = 'none'; }, 1800);
+}
+
+function showOverlay(title, desc) {
+    overlayTitle.textContent = title;
+    overlayDesc.textContent = desc;
+    overlayBtn.textContent = matchOver ? "RESTART MATCH" : "NEXT TURN";
+    overlay.style.display = 'flex';
+}
+
+function handleOverlayClick() {
+    overlay.style.display = 'none';
+
+    // Online: only the scorer's client resets the pitch, so the turn can't be flipped twice.
+    if (waitingForScorerReset && !matchOver) return;
+    waitingForScorerReset = false;
+
+    if (matchOver) {
+        score = { USER: 0, CPU: 0 };
+        updateScoreboard();
+        matchOver = false;
+        resultRecorded = false;
+        timeUp = false;
+        clockMs = MATCH_DURATION_MS;
+        clockLast = Date.now();
+        initTeams();
+        currentTurn = TEAM_USER;
+        actionHistory = [];
+        pendingEvent = null;
+        updateReplayButton();
+        turnIndicator.textContent = currentTurn === myTeam ? "YOUR TURN" : (mode === 'CPU' ? "CPU THINKING..." : "OPPONENT'S TURN");
+        if (mode === 'ONLINE') pushGameState();
+        else if (mode === 'CPU' && currentTurn === TEAM_CPU) setTimeout(playCpuTurn, 800);
+    } else {
+        initTeams();
+        switchTurn();
+    }
+}
+
+function showMatchEnd() {
+    waitingForScorerReset = false;
+    if (mode === 'CPU') clearCpuGame();
+    const mine = myTeam === TEAM_USER ? score.USER : score.CPU;
+    const theirs = myTeam === TEAM_USER ? score.CPU : score.USER;
+    const other = oppName().toUpperCase();
+    recordResult(mine, theirs);
+    let msg = mine > theirs ? 'YOU WIN THE MATCH!' : (mine < theirs ? `${other} WINS THE MATCH!` : "IT'S A DRAW!");
+    showOverlay(timeUp ? 'FULL TIME' : 'GAME OVER', msg);
+}
+
+// ---- TOASTS ----
+function showToast(message, type, duration = 3650) {
+    const el = document.createElement('div');
+    el.className = 'toast' + (type ? ' toast-' + type : '');
+    el.textContent = message;
+    toastContainer.appendChild(el);
+    while (toastContainer.children.length > 3) toastContainer.firstChild.remove();
+    setTimeout(() => el.remove(), duration);
+}
+
+// ---- LEAVE GAME ----
+function leaveGame() {
+    if (!confirm('Leave the game and return to the lobby?')) return;
+
+    if (mode === 'ONLINE' && gameRowId && sb) {
+        const leaveState = { ...serializeState(), leftBy: myToken };
+        sb.from('games').update({ state: leaveState, updated_at: new Date().toISOString() }).eq('id', gameRowId);
+    }
+
+    clearSession();
+    clearCpuGame();
+    teardownOnlineChannels();
+    returnToLobby();
+}
+
+function teardownOnlineChannels() {
+    if (presenceChannel) { presenceChannel.untrack(); sb.removeChannel(presenceChannel); presenceChannel = null; }
+    if (gameChannel) { sb.removeChannel(gameChannel); gameChannel = null; }
+    if (queueChannel) { sb.removeChannel(queueChannel); queueChannel = null; }
+}
+
+function returnToLobby() {
+    tableFrame.style.display = 'none';
+    lobbyFrame.style.display = 'block';
+    opponentProfile = null;
+    privatePanel.classList.remove('visible');
+    roomCodeBox.style.display = 'none';
+    lobbyCancel.style.display = 'none';
+    setLobbyStatus('');
+    history.replaceState(null, '', window.location.pathname);
+
+    inLobby = true;
+    mode = 'CPU';
+    gameRowId = null;
+    roomCode = null;
+    myToken = null;
+    matchOver = false;
+    isAnimating = false;
+    isReplaying = false;
+    actionHistory = [];
+    score = { USER: 0, CPU: 0 };
+    pendingEvent = null;
+    waitingForScorerReset = false;
+    timeUp = false;
+    refreshResumeButton();
+
+    hideReplayBanner();
+    overlay.style.display = 'none';
+    updateReplayButton();
+}
+
+// ---- REPLAY ----
+function showReplayBanner(text) {
+    replayBanner.textContent = 'REPLAY: ' + text;
+    replayBanner.style.display = 'block';
+}
+
+function hideReplayBanner() { replayBanner.style.display = 'none'; }
+
+function playReplay() {
+    if (actionHistory.length === 0 || isReplaying || isAnimating) return;
+    isReplaying = true;
+    updateReplayButton();
+
+    const liveState = {
+        pieces: pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y, p.angle)),
+        ballX: ball.x,
+        ballY: ball.y,
+        carrierId: ball.carrier ? ball.carrier.id : null,
+        selectedPiece,
+        selectedAction
+    };
+
+    selectedPiece = null;
+    selectedAction = null;
+    updateActionButtons();
+
+    const steps = actionHistory.slice();
+    let stepIndex = 0;
+
+    function playStep() {
+        if (stepIndex >= steps.length) {
+            setTimeout(() => {
+                pieces = liveState.pieces;
+                ball.x = liveState.ballX;
+                ball.y = liveState.ballY;
+                ball.carrier = liveState.carrierId ? pieces.find(p => p.id === liveState.carrierId) : null;
+                selectedPiece = liveState.selectedPiece;
+                selectedAction = liveState.selectedAction;
+                hideReplayBanner();
+                isReplaying = false;
+                updateActionButtons();
+            }, 500);
+            return;
+        }
+
+        const step = steps[stepIndex];
+        showReplayBanner(`${stepIndex + 1}/${steps.length}: ${step.description}`);
+
+        pieces = step.before.pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y, p.angle));
+        ball.x = step.before.ball.x;
+        ball.y = step.before.ball.y;
+        ball.carrier = step.before.ball.carrierId ? pieces.find(p => p.id === step.before.ball.carrierId) : null;
+
+        setTimeout(() => {
+            animateRemoteUpdate(pieces, step.after.pieces, step.after.ball.x, step.after.ball.y, () => {
+                ball.carrier = step.after.ball.carrierId ? pieces.find(p => p.id === step.after.ball.carrierId) : null;
+                stepIndex++;
+                setTimeout(playStep, 400);
+            });
+        }, 150);
+    }
+
+    playStep();
+}
+
+window.addEventListener('resize', () => {
+    const prevPortrait = isPortrait;
+    updateCanvasOrientation();
+    if (prevPortrait !== isPortrait) {
+        if (inLobby) initTeams(); else rotateBoardInPlace();
+    } else resizeCanvasDisplay();
+});
+
+initTeams();
+updateScoreboard();
+window.__renderStarted = true;
+refreshResumeButton();
+render();
+initProfileFlow();
+</script>
+</body>
+</html>
