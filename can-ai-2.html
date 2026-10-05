@@ -1,0 +1,3615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CantaBall Arena - Mobile Adaptive</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+* { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+html, body { touch-action: pan-y; }
+body {
+    margin: 0; padding: 8px; background: radial-gradient(ellipse at 50% -10%, rgba(255,220,120,0.28), transparent 55%), radial-gradient(ellipse at 50% 120%, rgba(30,107,39,0.4), transparent 60%), #0e0803; display: flex; justify-content: center;
+    align-items: flex-start; min-height: 100vh; color: #fff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow-y: auto; overflow-x: hidden;
+}
+#table-frame {
+    width: 100%; max-width: 1000px; padding: 10px; background-color: #5d3a1a;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect fill="%235d3a1a" width="100" height="100"/><path d="M0 50 Q 25 40, 50 50 T 100 50" stroke="%234a2f15" fill="none" stroke-width="2"/></svg>');
+    border-radius: 12px; box-shadow: inset 0 0 20px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.8);
+    position: relative; display: flex; flex-direction: column; align-items: center;
+}
+#scoreboard {
+    width: 100%; height: auto; min-height: 44px; background-color: #111; border: 2px solid #333; border-radius: 6px;
+    display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; margin-bottom: 8px;
+    box-shadow: inset 0 0 10px #000;
+}
+.score-box { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 14px; }
+.score-val { color: #ffcc00; font-family: 'Courier New', Courier, monospace; font-size: 22px; text-shadow: 0 0 8px #ffcc00; }
+#center-box { display: flex; flex-direction: column; align-items: center; }
+#match-timer { font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #fff; letter-spacing: 1px; margin-bottom: 3px; }
+#match-timer.low { color: #ff4d4d; animation: timer-pulse 1s infinite; }
+@keyframes timer-pulse { 50% { opacity: 0.4; } }
+#turn-indicator {
+    font-size: 11px; color: #ff4d4d; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+    background: #222; padding: 4px 10px; border-radius: 15px; border: 1px solid #ff4d4d; text-align: center;
+}
+#canvas-container {
+    position: relative; width: 100%; border-radius: 4px; overflow: hidden; box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    touch-action: none; display: flex; justify-content: center; align-items: center;
+}
+canvas {
+    display: block; background-color: #1e6b27;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><rect fill="%231e6b27" width="8" height="8"/><rect fill="%23185a20" width="2" height="2" x="0" y="0"/><rect fill="%23185a20" width="2" height="2" x="4" y="4"/></svg>');
+    cursor: pointer; touch-action: none;
+    /* width/height are set in JS (resizeCanvasDisplay) so the box always matches the buffer aspect ratio. */
+}
+#action-bar {
+    width: 100%; margin-top: 8px; background-color: #111; border: 2px solid #333; border-radius: 6px;
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; padding: 8px; gap: 6px;
+}
+.action-btn, .target-btn {
+    flex: 1 1 28%; min-height: 44px; padding: 8px 0; font-size: 13px; font-weight: bold; color: #888;
+    background-color: #222; border: 2px solid #444; border-radius: 6px; cursor: not-allowed;
+    transition: all 0.2s ease; -webkit-tap-highlight-color: transparent;
+}
+.action-btn.active { color: #111; background-color: #ffcc00; border-color: #ffe600; cursor: pointer; box-shadow: 0 0 10px rgba(255,204,0,0.4); }
+.action-btn.selected { outline: 2px solid #ff0055; background-color: #ff0055; color: #fff; }
+#target-selector { flex-wrap: wrap; }
+.take-shot-btn {
+    flex: 1 1 100%; min-height: 54px; font-size: 16px; font-weight: bold; letter-spacing: 1px; color: #fff;
+    background: linear-gradient(135deg, #ff0055, #c2003f); border: 2px solid #ff4d88; border-radius: 8px; cursor: pointer;
+    box-shadow: 0 0 14px rgba(255,0,85,0.5); -webkit-tap-highlight-color: transparent;
+}
+.take-shot-btn:active { transform: scale(0.98); }
+#target-selector {
+    display: none; width: 100%; align-items: center; gap: 6px; background: #1a1a1a; padding: 6px;
+    border-radius: 6px; border: 1px solid #333; margin-top: 4px;
+}
+.target-btn { flex: 1; cursor: pointer; font-size: 11px; padding: 8px 0; color: #ccc; border-color: #555; }
+.target-btn.active-target { background-color: #ff0055; border-color: #ff0055; color: #fff; box-shadow: 0 0 8px rgba(255,0,85,0.6); }
+#overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none;
+    flex-direction: column; justify-content: center; align-items: center; z-index: 10; backdrop-filter: blur(3px);
+    padding: 15px; text-align: center;
+}
+#overlay h1 { font-size: 36px; color: #ffcc00; margin: 0 0 8px 0; text-shadow: 0 0 15px #ffcc00; }
+#overlay p { font-size: 16px; color: #ccc; margin: 0 0 16px 0; }
+#overlay button {
+    padding: 10px 24px; font-size: 16px; font-weight: bold; background: #ffcc00; color: #000; border: none;
+    border-radius: 20px; cursor: pointer; box-shadow: 0 4px 15px rgba(255,204,0,0.4);
+}
+#log-text {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85);
+    color: #ffcc00; padding: 6px 14px; border-radius: 12px; font-size: 12px; pointer-events: none; display: none;
+    border: 1px solid #555; white-space: nowrap; z-index: 5;
+}
+#replay-banner {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85);
+    color: #ff0055; padding: 6px 16px; border-radius: 12px; font-size: 12px; font-weight: bold; letter-spacing: 1px;
+    text-transform: uppercase; pointer-events: none; display: none; border: 1px solid #ff0055;
+    box-shadow: 0 0 10px rgba(255,0,85,0.5); z-index: 6; white-space: nowrap;
+}
+#toast-container {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 1000; display: flex;
+    flex-direction: column; gap: 8px; align-items: center; pointer-events: none; width: calc(100% - 16px);
+}
+.toast {
+    background: rgba(20,20,20,0.95); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px;
+    font-weight: bold; border: 1px solid #ff4d4d; box-shadow: 0 4px 15px rgba(0,0,0,0.5); opacity: 0;
+    transform: translateY(-10px); animation: toast-in 0.25s ease forwards, toast-out 0.4s ease forwards 3s;
+    max-width: 100%; text-align: center;
+}
+.toast-good { border-color: #2ecc71; }
+.toast-bad  { border-color: #ff4d4d; }
+.toast-foul { border-color: #ff9900; color: #ffcc66; background: rgba(60,30,0,0.96); }
+.toast-info { border-color: #4d94ff; }
+@keyframes toast-in { to { opacity: 1; transform: translateY(0); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-10px); } }
+@media screen and (max-width: 600px) {
+    body { padding: 4px; }
+    #table-frame { padding: 6px; border-radius: 8px; }
+}
+/* ---------- LOBBY ---------- */
+#lobby-frame { width: 100%; max-width: 480px; margin-top: 2vh; border-radius: 20px; overflow: hidden; background: rgba(18,18,22,0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 20px 60px rgba(0,0,0,0.7); padding-bottom: 18px; text-align: center; }
+.hero { position: relative; padding: 24px 16px 18px; background: repeating-linear-gradient(90deg, #1e6b27 0 44px, #1a5d22 44px 88px); border-bottom: 3px solid #ffcc00; overflow: hidden; }
+.hero::before { content: ''; position: absolute; left: 50%; top: 50%; width: 150px; height: 150px; margin: -75px 0 0 -75px; border: 2px solid rgba(255,255,255,0.25); border-radius: 50%; }
+.hero::after { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.25); }
+.hero > * { position: relative; z-index: 1; }
+.hero-ball { width: 46px; height: 46px; animation: ball-bounce 1.4s ease-in-out infinite; filter: drop-shadow(0 6px 4px rgba(0,0,0,0.4)); }
+@keyframes ball-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+.hero h1 { margin: 6px 0 2px; font-size: 32px; letter-spacing: 6px; color: #fff; text-shadow: 0 2px 0 #0a3d10, 0 0 18px rgba(255,204,0,0.6); }
+.hero .tag { font-size: 11px; letter-spacing: 3px; color: #ffe680; font-weight: bold; }
+.profile { display: flex; gap: 12px; align-items: center; margin: 16px 16px 4px; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; text-align: left; }
+#avatar { flex: 0 0 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #ff4d4d, #b71c1c); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; border: 2px solid #ffcc00; }
+.profile-main { flex: 1; min-width: 0; }
+#player-name { width: 100%; background: transparent; border: none; border-bottom: 1px dashed #666; color: #fff; font-size: 16px; font-weight: bold; padding: 2px 0 4px; outline: none; user-select: text; -webkit-user-select: text; }
+#player-name:focus { border-bottom-color: #ffcc00; }
+.stats { display: flex; gap: 12px; margin-top: 8px; }
+.stats div { display: flex; flex-direction: column; }
+.stats b { color: #ffcc00; font-family: 'Courier New', monospace; font-size: 16px; }
+.stats span { font-size: 9px; color: #999; letter-spacing: 1px; text-transform: uppercase; }
+.resume-banner { display: none; width: calc(100% - 32px); margin: 12px 16px 0; padding: 12px; border-radius: 12px; border: 1px solid #ff0055; background: rgba(255,0,85,0.14); color: #fff; font-weight: bold; font-size: 13px; cursor: pointer; letter-spacing: 1px; }
+.modes { display: flex; flex-direction: column; gap: 10px; margin: 14px 16px 0; }
+.mode-card { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px; text-align: left; color: #fff; cursor: pointer; background: linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03)); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; transition: transform .15s, border-color .15s, box-shadow .15s; -webkit-tap-highlight-color: transparent; font-family: inherit; }
+.mode-card:hover, .mode-card:active { transform: translateY(-2px); border-color: #ffcc00; box-shadow: 0 8px 20px rgba(255,204,0,0.15); }
+.mode-card.primary { background: linear-gradient(135deg, #ffcc00, #ff9900); color: #111; border-color: #ffe600; }
+.mode-ico { font-size: 26px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); border-radius: 12px; }
+.mode-txt { flex: 1; display: flex; flex-direction: column; }
+.mode-txt b { font-size: 15px; letter-spacing: 0.5px; }
+.mode-txt small { font-size: 11px; opacity: 0.75; margin-top: 2px; }
+.chev { font-size: 24px; opacity: 0.6; }
+.howto { margin: 14px 16px 0; text-align: left; background: rgba(255,255,255,0.04); border-radius: 12px; border: 1px solid rgba(255,255,255,0.07); padding: 10px 14px; font-size: 12px; color: #ccc; }
+.howto summary { cursor: pointer; font-weight: bold; color: #ffcc00; letter-spacing: 1px; }
+.howto ul { margin: 8px 0 2px; padding-left: 18px; line-height: 1.7; }
+.lobby-btn { display: block; width: 100%; min-height: 48px; margin-bottom: 10px; font-size: 14px; font-weight: bold; color: #111; background-color: #ffcc00; border: 2px solid #ffe600; border-radius: 10px; cursor: pointer; }
+.lobby-btn.secondary { background-color: #222; color: #ffcc00; border-color: #444; }
+.lobby-panel { display: none; margin: 10px 16px 0; padding: 14px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; text-align: left; }
+.lobby-panel.visible { display: block; }
+input, select, textarea { user-select: text; -webkit-user-select: text; }
+#register-frame { width: 100%; max-width: 480px; margin-top: 2vh; border-radius: 20px; background: rgba(18,18,22,0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.09); box-shadow: 0 20px 60px rgba(0,0,0,0.7); padding: 24px 18px 20px; text-align: center; }
+#register-frame h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: 5px; color: #ffcc00; text-shadow: 0 0 15px rgba(255,204,0,0.6); }
+#register-frame .subtitle { color: #ccc; font-size: 13px; margin: 0 0 22px; }
+.form-group { margin-bottom: 14px; text-align: left; }
+.form-group label { display: block; font-size: 11px; color: #bbb; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.form-group input, .form-group select { width: 100%; padding: 12px; font-size: 16px; background: #111; border: 2px solid #444; border-radius: 8px; color: #ffcc00; }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: #ffcc00; }
+.pname { color: #fff; font-size: 16px; font-weight: bold; padding: 2px 0 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pname small { color: #999; font-weight: normal; font-size: 11px; margin-left: 6px; }
+.edit-link { color: #ffcc00; font-size: 11px; font-weight: normal; cursor: pointer; text-decoration: underline; margin-left: 8px; }
+#label-p1, #label-p2 { display: inline-block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+@media screen and (max-width: 600px) { #label-p1, #label-p2 { max-width: 62px; } }
+#setup-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 900; background: rgba(8,8,10,0.95); display: none; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 12px; }
+.setup-card { width: 100%; max-width: 520px; background: #1d1d22; border: 1px solid #333; border-radius: 16px; padding: 14px; margin: auto; }
+.setup-head { display: flex; justify-content: space-between; align-items: center; }
+.setup-head h2 { margin: 0; color: #ffcc00; letter-spacing: 2px; font-size: 18px; }
+#setup-timer { font-family: 'Courier New', monospace; font-size: 28px; font-weight: bold; color: #fff; }
+#setup-timer.low { color: #ff4d4d; animation: timer-pulse 1s infinite; }
+.setup-sub { display: flex; justify-content: space-between; font-size: 12px; color: #bbb; margin: 6px 0 12px; }
+.setup-sec { background: #15151a; border: 1px solid #2c2c33; border-radius: 12px; padding: 10px; margin-bottom: 10px; }
+.setup-title { font-weight: bold; font-size: 13px; color: #fff; display: flex; justify-content: space-between; }
+.price { color: #ffcc00; font-size: 12px; }
+.setup-desc { font-size: 11px; color: #999; margin: 4px 0 8px; line-height: 1.4; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 8px 12px; font-size: 12px; font-weight: bold; border-radius: 16px; border: 2px solid #444; background: #222; color: #ccc; cursor: pointer; }
+.chip.on { background: #ffcc00; color: #111; border-color: #ffe600; }
+.chip:disabled, .rule-row select:disabled { opacity: 0.5; }
+.rule-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-top: 1px solid #26262c; font-size: 12px; }
+.rule-name { flex: 1 1 80px; font-weight: bold; color: #fff; }
+.rule-row label { display: flex; flex-direction: column; font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; flex: 1 1 70px; }
+.rule-row select { margin-top: 2px; padding: 7px 4px; background: #111; color: #ffcc00; border: 1px solid #444; border-radius: 6px; font-size: 12px; }
+#setup-cost { display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin: 6px 2px 10px; }
+#setup-note { font-size: 12px; color: #ff9966; text-align: center; min-height: 16px; margin-top: 6px; }
+.tab-row { display: flex; gap: 0; margin-bottom: 14px; border-bottom: 2px solid #333; }
+.tab-btn {
+    flex: 1; padding: 10px 0; font-size: 13px; font-weight: bold; letter-spacing: 0.5px; color: #888;
+    background: transparent; border: none; border-bottom: 3px solid transparent; margin-bottom: -2px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.tab-btn.active { color: #ffcc00; border-bottom-color: #ffcc00; }
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+.tab-hint { font-size: 12px; color: #aaa; margin: 0 0 12px 0; line-height: 1.4; }
+.lobby-panel label { display: block; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.lobby-panel input { width: 100%; padding: 10px; font-size: 18px; letter-spacing: 3px; text-align: center; text-transform: uppercase; background: #111; border: 2px solid #444; border-radius: 8px; color: #ffcc00; margin-bottom: 10px; user-select: text; -webkit-user-select: text; }
+.lobby-status { margin: 14px 16px 0; font-size: 13px; color: #ffcc00; min-height: 18px; }
+.room-code-display { margin: 12px 16px; font-family: 'Courier New', monospace; font-size: 28px; letter-spacing: 6px; color: #ffcc00; background: #111; border: 2px dashed #555; border-radius: 10px; padding: 10px; }
+.cancel-link { display: inline-block; margin-top: 14px; color: #ff4d4d; font-size: 12px; cursor: pointer; text-decoration: underline; }
+#presence-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; background: #666; }
+#presence-dot.online { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
+#presence-dot.offline { background: #ff4d4d; box-shadow: 0 0 5px #ff4d4d; }
+</style>
+</head>
+<body>
+
+<div id="toast-container"></div>
+
+<div id="setup-overlay">
+    <div class="setup-card">
+        <div class="setup-head"><h2>MATCH SETUP</h2><div id="setup-timer">1:00</div></div>
+        <div class="setup-sub"><span id="setup-coins">🪙 —</span><span id="setup-opp">Opponent: setting up…</span></div>
+        <div id="setup-body"></div>
+        <div id="setup-cost"></div>
+        <button id="setup-ready-btn" class="lobby-btn" style="margin-bottom:0;" onclick="pressReady(false)">READY</button>
+        <div id="setup-note"></div>
+    </div>
+</div>
+
+<div id="register-frame" style="display:none;">
+    <h1>CANTABALL</h1>
+    <p class="subtitle" id="register-subtitle">Create your player profile to get started</p>
+    <div class="form-group"><label for="reg-name">Player name</label><input id="reg-name" maxlength="12" placeholder="Your name" autocomplete="off"></div>
+    <div class="form-group"><label for="reg-country">Country</label><select id="reg-country"></select></div>
+    <div class="form-group"><label for="reg-gender">Gender</label>
+        <select id="reg-gender">
+            <option value="">Select gender</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Prefer not to say">Prefer not to say</option>
+        </select>
+    </div>
+    <div id="reg-error" class="lobby-status" style="color:#ff6b6b;"></div>
+    <button id="reg-btn" class="lobby-btn" style="margin-top:8px;" onclick="submitRegistration()">START PLAYING</button>
+    <div id="reg-cancel" class="cancel-link" style="display:none;" onclick="enterLobbyScreen()">Cancel</div>
+</div>
+
+<div id="lobby-frame" style="display:none;">
+    <div class="hero">
+        <svg class="hero-ball" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#222" stroke-width="2"/><polygon points="24,14 33,21 30,32 18,32 15,21" fill="#222"/><path d="M24 14V4M33 21l10-4M30 32l7 8M18 32l-7 8M15 21L5 17" stroke="#222" stroke-width="2" fill="none"/></svg>
+        <h1>CANTABALL</h1>
+        <div class="tag">ARENA &middot; 5v5 TURN-BASED</div>
+    </div>
+
+    <div class="profile">
+        <div id="avatar">P</div>
+        <div class="profile-main">
+            <div id="player-name-display" class="pname"></div>
+            <div class="stats">
+                <div><b id="stat-played">0</b><span>Played</span></div>
+                <div><b id="stat-won">0</b><span>Won</span></div>
+                <div><b id="stat-rate">0%</b><span>Win rate</span></div>
+                <div><b id="stat-goals">0</b><span>Goals</span></div>
+                <div><b id="stat-coins">—</b><span>Coins</span></div>
+            </div>
+        </div>
+    </div>
+
+    <button id="resume-cpu-btn" class="resume-banner" onclick="resumeCpuGame()">▶ RESUME YOUR CPU MATCH</button>
+
+    <div class="modes">
+        <button class="mode-card primary" onclick="startRandomMatch()"><span class="mode-ico">🌐</span><span class="mode-txt"><b>QUICK MATCH</b><small>Get paired with a random player online</small></span><span class="chev">›</span></button>
+        <button class="mode-card" onclick="showPrivatePanel()"><span class="mode-ico">🔑</span><span class="mode-txt"><b>PRIVATE ROOM</b><small>Play a friend with a 5-letter code</small></span><span class="chev">›</span></button>
+        <button class="mode-card" onclick="startVsCpu()"><span class="mode-ico">🤖</span><span class="mode-txt"><b>PRACTICE VS CPU</b><small>Warm up solo, no waiting</small></span><span class="chev">›</span></button>
+    </div>
+
+    <div id="private-panel" class="lobby-panel">
+        <div class="tab-row">
+            <button id="tab-create" class="tab-btn active" onclick="setPrivateTab('create')">CREATE GAME</button>
+            <button id="tab-join" class="tab-btn" onclick="setPrivateTab('join')">JOIN GAME</button>
+        </div>
+        <div id="pane-create" class="tab-pane active">
+            <p class="tab-hint">Create a room and share the 5-letter code with a friend.</p>
+            <button class="lobby-btn" style="margin-bottom:0;" onclick="createPrivateRoom()">CREATE ROOM</button>
+        </div>
+        <div id="pane-join" class="tab-pane">
+            <label for="join-code-input">Enter room code</label>
+            <input id="join-code-input" maxlength="5" placeholder="ABCDE" autocomplete="off">
+            <button class="lobby-btn" style="margin-bottom:0;" onclick="joinPrivateRoomFromInput()">JOIN ROOM</button>
+        </div>
+    </div>
+
+    <div id="lobby-status" class="lobby-status"></div>
+    <div id="room-code-box" class="room-code-display" style="display:none;"></div>
+    <div id="lobby-cancel" class="cancel-link" style="display:none;" onclick="cancelLobbyFlow()">Cancel</div>
+
+    <details class="howto">
+        <summary>HOW TO PLAY</summary>
+        <ul>
+            <li>Tap one of your players, then tap the pitch to <b>move</b> (they turn to face where they run).</li>
+            <li>The ball carrier can <b>pass</b> to a teammate or <b>shoot</b> when in range.</li>
+            <li>To shoot: pick <b>LEFT / CENTER / RIGHT</b> and check the aiming line, then press <b>TAKE SHOT</b>. The ball follows the line exactly, unless a defender is standing on it (the line turns red).</li>
+            <li>Win the ball by tackling the carrier from the <b>front</b>. Side or back tackles are <b>fouls</b>.</li>
+            <li>Before each match you get <b>1 minute to set up</b>: choose the game duration and optionally select a ⭐ star player (shoots from anywhere), then press <b>READY</b>. The match starts when both players are ready.</li>
+            <li>Matches use the selected duration. First to 3 goals wins, or lead when time runs out.</li>
+            <li>Closed the tab by accident? Reopen the page and you'll rejoin automatically.</li>
+        </ul>
+    </details>
+</div>
+
+<div id="table-frame" style="display:none;">
+    <div id="scoreboard">
+        <div class="score-box">
+            <span id="presence-dot"></span>
+            <span id="label-p1" style="color: #ff4d4d;">YOU</span>
+            <span id="score-p1" class="score-val">0</span>
+        </div>
+        <div id="center-box"><div id="match-timer">5:00</div><div id="turn-indicator">YOUR TURN</div></div>
+        <div class="score-box">
+            <span id="score-p2" class="score-val">0</span>
+            <span id="label-p2" style="color: #4d94ff;">CPU</span>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <div id="overlay">
+            <h1 id="overlay-title">GOAL!</h1>
+            <p id="overlay-desc">Player scored!</p>
+            <button id="overlay-btn" onclick="handleOverlayClick()">CONTINUE</button>
+        </div>
+        <div id="log-text">Pass Successful!</div>
+        <canvas id="gameCanvas" width="1000" height="550"></canvas>
+    </div>
+
+    <div id="action-bar">
+        <button id="btn-move" class="action-btn" onclick="setAction('MOVE')">MOVE</button>
+        <button id="btn-pass" class="action-btn" onclick="setAction('PASS')">PASS</button>
+        <button id="btn-shoot" class="action-btn" onclick="setAction('SHOOT')">SHOOT</button>
+        <div id="target-selector">
+            <button id="target-left" class="target-btn" onclick="setTargetZone('LEFT')">LEFT</button>
+            <button id="target-center" class="target-btn active-target" onclick="setTargetZone('CENTER')">CENTER</button>
+            <button id="target-right" class="target-btn" onclick="setTargetZone('RIGHT')">RIGHT</button>
+            <button id="btn-take-shot" class="take-shot-btn" onclick="takeShot()">🎯 TAKE SHOT</button>
+        </div>
+    </div>
+
+    <div id="leave-link" class="cancel-link" onclick="leaveGame()">Leave Game</div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const canvasContainer = document.getElementById('canvas-container');
+
+const turnIndicator = document.getElementById('turn-indicator');
+const scoreP1Display = document.getElementById('score-p1');
+const scoreP2Display = document.getElementById('score-p2');
+const btnMove = document.getElementById('btn-move');
+const btnPass = document.getElementById('btn-pass');
+const btnShoot = document.getElementById('btn-shoot');
+const targetSelector = document.getElementById('target-selector');
+const targetLeft = document.getElementById('target-left');
+const targetCenter = document.getElementById('target-center');
+const targetRight = document.getElementById('target-right');
+const overlay = document.getElementById('overlay');
+const overlayTitle = document.getElementById('overlay-title');
+const overlayDesc = document.getElementById('overlay-desc');
+const overlayBtn = document.getElementById('overlay-btn');
+const logText = document.getElementById('log-text');
+const replayBanner = null;
+const toastContainer = document.getElementById('toast-container');
+const matchTimerEl = document.getElementById('match-timer');
+const resumeCpuBtn = document.getElementById('resume-cpu-btn');
+
+const WIN_SCORE = 3;
+const PieceRadius = 16;
+const TouchHitboxRadius = 32;
+const BallRadius = 7;
+const MoveRadius = 140;
+const ShootRange = 360;
+const GoalWidth = 18;      // goal depth (was 24)
+const GoalHeight = 100;    // goal mouth size (was 160)
+const FRONT_HALF_ANGLE = Math.PI / 3;   // +/-60 degrees in front of a player = legal tackle zone
+const BACK_HALF_ANGLE = Math.PI * 3 / 4; // beyond 135 degrees from facing = from behind
+
+const TEAM_USER = 'USER';
+const TEAM_CPU = 'CPU';
+
+let isPortrait = false;
+let currentTurn = TEAM_USER;
+let selectedPiece = null;
+let selectedAction = null;
+let targetZone = 'CENTER';
+let score = { USER: 0, CPU: 0 };
+let isAnimating = false;
+let matchOver = false;
+let pointerPos = null;
+let ball = { x: 500, y: 275, carrier: null };
+let pieces = [];
+let inLobby = true;
+let opponentLeftHandled = false;
+
+// ---- Notification sync ----
+// Every gameplay event gets a unique id and travels inside the synced state
+// (state.lastEvent). The opponent shows it once, by id, so repeated identical
+// messages (e.g. two "Pass Complete!" in a row) are never swallowed and stale
+// messages are never re-shown.
+let pendingEvent = null;        // event created by my last action, consumed by the next push
+let lastShownEventId = null;    // last event id already toasted on this client
+let eventCounter = 0;
+let waitingForScorerReset = false; // true on the non-scoring client until the scorer resets the pitch
+let logTimer = null;
+
+// ---- Match clock ----
+const GAME_DURATION_OPTIONS = [3, 5, 10];
+const DEFAULT_GAME_DURATION_MINUTES = 5;
+let matchDurationMs = DEFAULT_GAME_DURATION_MINUTES * 60 * 1000;
+let clockMs = matchDurationMs;           // time remaining
+let clockLast = Date.now();
+let timeUp = false;
+
+// ---- Session persistence (rejoin after accidental leave / refresh / closed tab) ----
+const SESSION_KEY = 'cantaball_session_v1';
+const CPU_KEY = 'cantaball_cpu_v1';
+const SESSION_MAX_AGE = 6 * 60 * 60 * 1000;
+let lastSeenUpdatedAt = null;
+let resumingCpu = false;
+
+// ---- Pre-match setup phase ----
+let phase = 'PLAY';             // 'SETUP' (1 minute before kick-off) | 'PLAY'
+let roundNo = 1;                // increments on every rematch so stale "ready" flags are ignored
+let mySetup = null, oppSetup = null;
+let iAmReady = false, oppReady = false, readyBusy = false;
+let matchSetups = null;         // {USER:{star,rules}, CPU:{star,rules}} once the match is under way
+let setupTimerId = null, setupEndsAt = 0;
+
+const MAX_REPLAY_HISTORY = 6;
+let actionHistory = [];
+let isReplaying = false;
+
+// =====================================================================
+// ONLINE PLAY - Supabase Realtime + Presence
+// =====================================================================
+const SUPABASE_URL = 'https://smyhgyrbnmxykprimuve.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNteWhneXJibm14eWtwcmltdXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU3MDI2ODIsImV4cCI6MjEwMTI3ODY4Mn0.6eKJoV-d3sNdNQhFVp4vlkIC2381cLAIoWgRT1MmzFE';
+
+const sb = (SUPABASE_URL.startsWith('http') && window.supabase)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+let mode = 'CPU';
+let myTeam = TEAM_USER;
+let myToken = null;
+let gameRowId = null;
+let roomCode = null;
+let gameChannel = null;
+let presenceChannel = null;
+let queueChannel = null;
+let queueRowId = null;
+let suppressNextPush = false;
+
+const lobbyFrame = document.getElementById('lobby-frame');
+const tableFrame = document.getElementById('table-frame');
+const privatePanel = document.getElementById('private-panel');
+const lobbyStatus = document.getElementById('lobby-status');
+const roomCodeBox = document.getElementById('room-code-box');
+const lobbyCancel = document.getElementById('lobby-cancel');
+const labelP1 = document.getElementById('label-p1');
+const labelP2 = document.getElementById('label-p2');
+const presenceDot = document.getElementById('presence-dot');
+
+function uuid() {
+    return (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    }));
+}
+
+function generateRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+}
+
+function setLobbyStatus(msg) { lobbyStatus.textContent = msg; }
+function showPrivatePanel() {
+    privatePanel.classList.add('visible');
+    setPrivateTab('create');
+}
+
+function setPrivateTab(tab) {
+    const isCreate = tab === 'create';
+    document.getElementById('tab-create').classList.toggle('active', isCreate);
+    document.getElementById('tab-join').classList.toggle('active', !isCreate);
+    document.getElementById('pane-create').classList.toggle('active', isCreate);
+    document.getElementById('pane-join').classList.toggle('active', !isCreate);
+    setLobbyStatus('');
+    if (!isCreate) setTimeout(() => document.getElementById('join-code-input').focus(), 50);
+}
+
+function cancelLobbyFlow() {
+    clearSession();
+    if (sb && queueRowId) { sb.from('matchmaking_queue').delete().eq('id', queueRowId).then(() => {}, () => {}); queueRowId = null; }
+    if (sb && gameRowId && mode !== 'ONLINE') { sb.from('games').delete().eq('id', gameRowId).eq('status', 'waiting').then(() => {}, () => {}); gameRowId = null; }
+    if (queueChannel) { sb.removeChannel(queueChannel); queueChannel = null; }
+    if (gameChannel) { sb.removeChannel(gameChannel); gameChannel = null; }
+    if (presenceChannel) { sb.removeChannel(presenceChannel); presenceChannel = null; }
+    roomCodeBox.style.display = 'none';
+    lobbyCancel.style.display = 'none';
+    setLobbyStatus('');
+    history.replaceState(null, '', window.location.pathname);
+}
+
+function requireSupabase() {
+    if (!sb) {
+        setLobbyStatus('Online play needs a Supabase project - fill in SUPABASE_URL / SUPABASE_ANON_KEY in the code.');
+        return false;
+    }
+    return true;
+}
+
+// ---- VS CPU ----
+function startVsCpu() {
+    mode = 'CPU';
+    myTeam = TEAM_USER;
+    opponentProfile = null;
+    refreshNames();
+    presenceDot.style.display = 'none';
+    clearCpuGame();
+    enterGame();
+}
+
+// ---- PRIVATE ROOM ----
+async function createPrivateRoom() {
+    if (!requireSupabase()) return;
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
+    roomCode = generateRoomCode();
+    setLobbyStatus('Creating room...');
+
+    const initialState = buildInitialState();
+    const { data, error } = await sb.from('games').insert({
+        room_code: roomCode, mode: 'PRIVATE', player_a_token: myToken, status: 'waiting', state: initialState
+    }).select().single();
+
+    if (error) { setLobbyStatus('Could not create room: ' + error.message); return; }
+
+    gameRowId = data.id;
+    myTeam = TEAM_USER;
+    updateUrlForRoom();
+    saveSession();
+
+    roomCodeBox.textContent = roomCode;
+    roomCodeBox.style.display = 'block';
+    lobbyCancel.style.display = 'inline-block';
+    setLobbyStatus('Waiting for opponent to join with this code...');
+    subscribeWaitingForOpponent();
+}
+
+function joinPrivateRoomFromInput() {
+    const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+    if (code.length !== 5) { setLobbyStatus('Enter the 5-character room code.'); return; }
+    joinPrivateRoom(code);
+}
+
+async function joinPrivateRoom(code) {
+    if (!requireSupabase()) return;
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
+    setLobbyStatus('Joining room...');
+
+    const { data: row, error: findErr } = await sb.from('games')
+        .select('*').eq('room_code', code).eq('status', 'waiting').is('player_b_token', null).maybeSingle();
+    if (findErr || !row) { setLobbyStatus('Room not found or already full.'); return; }
+    if (row.player_a_token === myToken) { setLobbyStatus("That's your own room - share the code with a friend."); return; }
+
+    const { data: updated, error: updErr } = await sb.from('games')
+        .update({ player_b_token: myToken, status: 'active' })
+        .eq('id', row.id).eq('status', 'waiting').select().single();
+    if (updErr || !updated) { setLobbyStatus('That room was just taken. Try another code.'); return; }
+
+    gameRowId = updated.id;
+    roomCode = code;
+    myTeam = TEAM_CPU;
+    updateUrlForRoom();
+    beginOnlineMatch(updated);
+}
+
+function subscribeWaitingForOpponent() {
+    gameChannel = sb.channel('game-wait-' + gameRowId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameRowId}` }, (payload) => {
+            if (payload.new.player_b_token && payload.new.status === 'active') {
+                sb.removeChannel(gameChannel);
+                gameChannel = null;
+                beginOnlineMatch(payload.new);
+            }
+        })
+        .subscribe();
+}
+
+// ---- RANDOM MATCH ----
+async function startRandomMatch() {
+    if (!requireSupabase()) return;
+    if (!(await ensureProfile())) return;
+    myToken = profile.id;
+    lobbyCancel.style.display = 'inline-block';
+    setLobbyStatus('Searching for an opponent...');
+
+    const { data: myRow, error: insertErr } = await sb.from('matchmaking_queue')
+        .insert({ player_token: myToken, status: 'waiting' }).select().single();
+    if (insertErr) { setLobbyStatus('Could not join matchmaking: ' + insertErr.message); return; }
+    queueRowId = myRow.id;
+
+    const claimed = await tryClaimOpponent();
+    if (claimed) return;
+
+    queueChannel = sb.channel('queue-wait-' + queueRowId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matchmaking_queue', filter: `id=eq.${queueRowId}` }, async (payload) => {
+            if (payload.new.status === 'matched' && payload.new.game_id) {
+                sb.removeChannel(queueChannel);
+                queueChannel = null;
+                const { data: gameRow } = await sb.from('games').select('*').eq('id', payload.new.game_id).single();
+                if (gameRow) {
+                    gameRowId = gameRow.id;
+                    myTeam = TEAM_CPU;
+                    beginOnlineMatch(gameRow);
+                }
+            }
+        })
+        .subscribe();
+}
+
+async function tryClaimOpponent() {
+    const { data: candidates } = await sb.from('matchmaking_queue')
+        .select('*').eq('status', 'waiting').gte('created_at', new Date(Date.now() - 120000).toISOString()).neq('id', queueRowId).neq('player_token', myToken).order('created_at', { ascending: true }).limit(5);
+
+    if (!candidates || candidates.length === 0) return false;
+
+    for (const candidate of candidates) {
+        const { data: claimedRow, error } = await sb.from('matchmaking_queue')
+            .update({ status: 'matched' }).eq('id', candidate.id).eq('status', 'waiting').select().maybeSingle();
+
+        if (!error && claimedRow) {
+            const initialState = buildInitialState();
+            const { data: newGame, error: gameErr } = await sb.from('games').insert({
+                mode: 'RANDOM', player_a_token: myToken, player_b_token: candidate.player_token,
+                status: 'active', state: initialState
+            }).select().single();
+
+            if (gameErr || !newGame) return false;
+
+            await sb.from('matchmaking_queue').update({ status: 'matched', game_id: newGame.id }).eq('id', candidate.id);
+            await sb.from('matchmaking_queue').update({ status: 'matched', game_id: newGame.id }).eq('id', queueRowId);
+
+            gameRowId = newGame.id;
+            myTeam = TEAM_USER;
+            beginOnlineMatch(newGame);
+            return true;
+        }
+    }
+    return false;
+}
+
+// ---- SHARED ONLINE SETUP ----
+function updateUrlForRoom() {
+    const params = new URLSearchParams();
+    params.set('room', roomCode);
+    params.set('pid', myToken);
+    history.replaceState(null, '', '?' + params.toString());
+}
+
+function beginOnlineMatch(row) {
+    mode = 'ONLINE';
+    gameRowId = row.id;
+    roomCode = row.room_code || roomCode;
+    applyState(row.state, true);
+    lastSeenUpdatedAt = row.updated_at || null;
+    saveSession();
+    loadOpponentProfile(row);
+    refreshNames();
+    presenceDot.style.display = 'inline-block';
+    subscribeToGame();
+    subscribeToPresence();
+    enterGame();
+}
+
+function handleIncomingState(newState, updatedAt) {
+    if (!newState) return;
+    if (updatedAt) lastSeenUpdatedAt = updatedAt;
+
+    if (newState.leftBy && newState.leftBy !== myToken) {
+        opponentLeftHandled = true;
+        clearSession();
+        showToast(oppName() + ' left the game', 'info');
+        matchOver = true;
+        turnIndicator.textContent = 'OPPONENT LEFT';
+        return;
+    }
+
+    // Ignore the echo of my own update - I already applied it locally.
+    if (newState.by === myToken) return;
+    if (newState.name && !opponentProfile) { opponentProfile = { name: String(newState.name).slice(0, 12) }; refreshNames(); }
+    saveSession();
+
+    const ev = newState.lastEvent;
+    if (ev && ev.id && ev.id !== lastShownEventId) {
+        lastShownEventId = ev.id;
+        showToast(ev.msg, ev.type);
+    }
+    applyState(newState, false);
+}
+
+function subscribeToGame() {
+    gameChannel = sb.channel('game-live-' + gameRowId)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameRowId}` }, (payload) => {
+            handleIncomingState(payload.new.state, payload.new.updated_at);
+        })
+        .subscribe();
+}
+
+// After a dropped connection / phone sleep, realtime can miss updates - pull the latest row.
+async function resyncFromServer() {
+    if (mode !== 'ONLINE' || !gameRowId || !sb || inLobby || isAnimating) return;
+    const { data: row } = await sb.from('games').select('state, updated_at').eq('id', gameRowId).maybeSingle();
+    if (!row || !row.state) return;
+    if (lastSeenUpdatedAt && new Date(row.updated_at) <= new Date(lastSeenUpdatedAt)) return;
+    handleIncomingState(row.state, row.updated_at);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resyncFromServer(); });
+window.addEventListener('online', resyncFromServer);
+
+function subscribeToPresence() {
+    presenceChannel = sb.channel('presence-' + gameRowId, { config: { presence: { key: myToken } } });
+    presenceChannel
+        .on('presence', { event: 'sync' }, () => {
+            const state = presenceChannel.presenceState();
+            const others = Object.keys(state).filter(k => k !== myToken);
+            presenceDot.classList.toggle('online', others.length > 0);
+            presenceDot.classList.toggle('offline', others.length === 0);
+            syncOpponentFromPresence();
+        })
+        .on('presence', { event: 'join' }, ({ key }) => {
+            if (key !== myToken && mode === 'ONLINE' && !matchOver) showToast(oppName() + ' connected', 'info');
+        })
+        .on('presence', { event: 'leave' }, ({ key }) => {
+            if (key !== myToken && mode === 'ONLINE' && !opponentLeftHandled && !matchOver) {
+                showToast(oppName() + ' disconnected', 'bad');
+            }
+        })
+        .subscribe(async (status) => {
+            if (status === 'SUBSCRIBED') await publishSetup();
+        });
+}
+
+function buildInitialState() {
+    matchSetups = null;
+    phase = 'SETUP';
+    roundNo = 1;
+    updateCanvasOrientation();
+    initTeams();
+    currentTurn = TEAM_USER;
+    matchOver = false;
+    score = { USER: 0, CPU: 0 };
+    pendingEvent = null;
+    clockMs = matchDurationMs;
+    timeUp = false;
+    return serializeState();
+}
+
+function serializeState() {
+    return {
+        pieces: pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+        ball: { x: ball.x, y: ball.y, carrierId: ball.carrier ? ball.carrier.id : null },
+        score: { ...score },
+        currentTurn,
+        matchOver,
+        isPortrait,
+        lastScorer: window.__lastScorer || null,
+        lastEvent: pendingEvent,
+        clockMs: Math.round(clockMs),
+        timeUp,
+        phase,
+        round: roundNo,
+        setup: matchSetups,
+        name: myName || null,
+        by: myToken
+    };
+}
+
+function snapshotBoard() {
+    return {
+        pieces: pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+        ball: { x: ball.x, y: ball.y, carrierId: ball.carrier ? ball.carrier.id : null }
+    };
+}
+
+function recordAction(type, description, beforeSnap, afterSnap) {
+    actionHistory.push({ type, description, before: beforeSnap, after: afterSnap || snapshotBoard() });
+    if (actionHistory.length > MAX_REPLAY_HISTORY) actionHistory.shift();
+    updateReplayButton();
+}
+
+function updateReplayButton() {}   // replay button removed
+
+function toastTypeFor(msg) {
+    if (/foul/i.test(msg)) return 'foul';
+    if (/clean|complete|recovered|scored/i.test(msg)) return 'good';
+    if (/intercept|repel|blocked|missed|saved/i.test(msg)) return 'bad';
+    return 'info';
+}
+
+// Toast for me + queue the event so it rides along with the next state push to the opponent.
+function logAndToast(msg, type) {
+    if (!msg) return;
+    type = type || toastTypeFor(msg);
+    showToast(msg, type);
+    pendingEvent = { id: (myToken || 'local') + '-' + (++eventCounter) + '-' + Date.now(), msg, type };
+    lastShownEventId = pendingEvent.id;
+}
+
+// Pitch rotation between landscape (1000x550) and portrait (550x1000) so players on
+// different screens (or rejoining from another device) see the same game.
+function convertPos(x, y, angle, toPortrait) {
+    if (toPortrait) return { x: y, y: 1000 - x, angle: angle - Math.PI / 2 };
+    return { x: 1000 - y, y: x, angle: angle + Math.PI / 2 };
+}
+
+function normalizeState(s) {
+    if (typeof s.isPortrait !== 'boolean' || s.isPortrait === isPortrait) return s;
+    const out = { ...s };
+    out.pieces = s.pieces.map(p => { const c = convertPos(p.x, p.y, p.angle || 0, isPortrait); return { ...p, x: c.x, y: c.y, angle: c.angle }; });
+    const b = convertPos(s.ball.x, s.ball.y, 0, isPortrait);
+    out.ball = { ...s.ball, x: b.x, y: b.y };
+    out.isPortrait = isPortrait;
+    return out;
+}
+
+function rotateBoardInPlace() {
+    if (isAnimating || isReplaying) { setTimeout(rotateBoardInPlace, 450); return; }
+    resizeCanvasDisplay();
+    pieces.forEach(p => { const c = convertPos(p.x, p.y, p.angle || 0, isPortrait); p.x = c.x; p.y = c.y; p.angle = c.angle; });
+    const b = convertPos(ball.x, ball.y, 0, isPortrait);
+    ball.x = b.x; ball.y = b.y;
+    selectedPiece = null; selectedAction = null; pointerPos = null; actionHistory = [];
+    updateActionButtons();
+    updateReplayButton();
+}
+
+function applyState(s, isInitial) {
+    s = normalizeState(s);
+    const incomingPhase = s.phase || 'PLAY';
+    if (phase === 'PLAY' && incomingPhase === 'SETUP' && !isInitial) return;   // stale pre-match state
+    if (s.setup) matchSetups = { USER: normSetup(s.setup.USER), CPU: normSetup(s.setup.CPU) };
+    if (incomingPhase === 'PLAY' && phase === 'SETUP') { phase = 'PLAY'; closeSetupUI(); clockLast = Date.now(); }
+    else if (isInitial) { phase = incomingPhase; roundNo = s.round || 1; }
+    if (typeof s.clockMs === 'number') { clockMs = s.clockMs; clockLast = Date.now(); }
+    suppressNextPush = true;
+    const prevScore = { ...score };
+    const wasMatchOver = matchOver;
+
+    const prevPieces = pieces;
+    const prevBallX = ball.x;
+    const prevBallY = ball.y;
+
+    score = { ...s.score };
+
+    const shouldAnimate = !isInitial && !isAnimating && mode === 'ONLINE';
+
+    selectedPiece = null;
+    selectedAction = null;
+    pointerPos = null;
+
+    if (shouldAnimate) {
+        const prevById = {};
+        prevPieces.forEach(p => { prevById[p.id] = p; });
+
+        const beforeSnap = {
+            pieces: prevPieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+            ball: { x: prevBallX, y: prevBallY, carrierId: ball.carrier ? ball.carrier.id : null }
+        };
+        const afterSnap = {
+            pieces: s.pieces.map(p => ({ id: p.id, team: p.team, role: p.role, x: p.x, y: p.y, angle: p.angle })),
+            ball: { x: s.ball.x, y: s.ball.y, carrierId: s.ball.carrierId }
+        };
+
+        pieces = s.pieces.map(pd => {
+            const old = prevById[pd.id];
+            return new Piece(pd.id, pd.team, pd.role, old ? old.x : pd.x, old ? old.y : pd.y, pd.angle);
+        });
+
+        ball.x = prevBallX;
+        ball.y = prevBallY;
+        ball.carrier = null;
+
+        isAnimating = true;
+        animateRemoteUpdate(pieces, s.pieces, s.ball.x, s.ball.y, () => {
+            ball.x = s.ball.x;
+            ball.y = s.ball.y;
+            ball.carrier = s.ball.carrierId ? pieces.find(p => p.id === s.ball.carrierId) : null;
+            isAnimating = false;
+            recordAction('REMOTE', s.lastEvent ? s.lastEvent.msg : "Opponent's last play", beforeSnap, afterSnap);
+            finishApplyState(s, prevScore, wasMatchOver);
+        });
+    } else {
+        pieces = s.pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y, p.angle));
+        ball.x = s.ball.x;
+        ball.y = s.ball.y;
+        ball.carrier = s.ball.carrierId ? pieces.find(p => p.id === s.ball.carrierId) : null;
+        finishApplyState(s, prevScore, wasMatchOver);
+    }
+}
+
+function animateRemoteUpdate(pieceObjs, targetData, targetBallX, targetBallY, callback) {
+    const duration = 380;
+    const startTime = performance.now();
+    const starts = pieceObjs.map(p => ({ x: p.x, y: p.y }));
+    const ballStart = { x: ball.x, y: ball.y };
+    pieceObjs.forEach((p, i) => { if (typeof targetData[i].angle === 'number') p.angle = targetData[i].angle; });
+
+    function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3);
+
+        pieceObjs.forEach((p, i) => {
+            p.x = starts[i].x + (targetData[i].x - starts[i].x) * ease;
+            p.y = starts[i].y + (targetData[i].y - starts[i].y) * ease;
+        });
+        ball.x = ballStart.x + (targetBallX - ballStart.x) * ease;
+        ball.y = ballStart.y + (targetBallY - ballStart.y) * ease;
+
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            pieceObjs.forEach((p, i) => { p.x = targetData[i].x; p.y = targetData[i].y; });
+            callback();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function finishApplyState(s, prevScore, wasMatchOver) {
+    currentTurn = s.currentTurn;
+    matchOver = s.matchOver;
+    timeUp = !!s.timeUp;
+
+    updateActionButtons();
+    updateScoreboard();
+
+    const scoreChanged = (score.USER + score.CPU) > (prevScore.USER + prevScore.CPU);
+
+    // The scorer resets the pitch; once that update lands, close my goal overlay.
+    if (waitingForScorerReset && !scoreChanged) {
+        waitingForScorerReset = false;
+        if (!matchOver) overlay.style.display = 'none';
+    }
+
+    if (!wasMatchOver) {
+        if (matchOver) {
+            showMatchEnd();
+        } else if (scoreChanged) {
+            const scorerIsMe = s.lastScorer === myTeam;
+            showOverlay('GOAL!', scorerIsMe ? 'You scored!' : oppName() + ' scored!');
+            if (!scorerIsMe) {
+                waitingForScorerReset = true;
+                overlayBtn.textContent = 'OK';
+            }
+        }
+    }
+
+    turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : "OPPONENT'S TURN";
+    turnIndicator.style.borderColor = currentTurn === myTeam ? '#ff4d4d' : '#4d94ff';
+    suppressNextPush = false;
+}
+
+async function pushGameState(scorerTeam) {
+    if (mode !== 'ONLINE' || !gameRowId || suppressNextPush) return;
+    window.__lastScorer = scorerTeam || null;
+    const s = serializeState();
+    pendingEvent = null; // consumed
+    const ts = new Date().toISOString();
+    lastSeenUpdatedAt = ts;
+    saveSession();
+    const { error } = await sb.from('games').update({ state: s, updated_at: ts }).eq('id', gameRowId);
+    if (error) showToast('Sync failed - check your connection', 'bad');
+}
+
+// =====================================================================
+// PRE-MATCH SETUP
+// =====================================================================
+const SETUP_SECONDS = 60;
+const STAR_COST = 50;
+const SLOT_NAMES = { 1: 'Defender', 2: 'Wide A', 3: 'Wide B', 4: 'Midfield', 5: 'Forward' };
+const CPU_SETUP = { star: 4, duration: DEFAULT_GAME_DURATION_MINUTES };
+
+function emptySetup() {
+    return { star: null, duration: DEFAULT_GAME_DURATION_MINUTES };
+}
+function normSetup(x) {
+    const out = emptySetup();
+    if (!x) return out;
+    out.star = (x.star >= 1 && x.star <= 5) ? Math.floor(x.star) : null;
+    const duration = Number(x.duration);
+    out.duration = GAME_DURATION_OPTIONS.includes(duration) ? duration : DEFAULT_GAME_DURATION_MINUTES;
+    return out;
+}
+function setupCost(st) {
+    return st.star ? STAR_COST : 0;
+}
+function pieceFor(team, slot) { return pieces.find(p => p.id === (team === TEAM_USER ? 0 : 5) + slot); }
+function axisDir(team) {
+    if (isPortrait) return { x: 0, y: team === TEAM_USER ? -1 : 1 };
+    return { x: team === TEAM_USER ? 1 : -1, y: 0 };
+}
+function applySetupRoles() {
+    pieces.forEach(p => { p.role = 'FIELD'; });
+    [TEAM_USER, TEAM_CPU].forEach(t => {
+        const st = matchSetups && matchSetups[t];
+        if (st && st.star) { const p = pieceFor(t, st.star); if (p) p.role = 'STAR'; }
+    });
+}
+function canAfford(st) {
+    if (mode === 'CPU') return true;   // practice vs CPU is free
+    const c = (profile && typeof profile.coins === 'number') ? profile.coins : 0;
+    return setupCost(st) <= c;
+}
+
+// ---- coins ----
+function updateCoinUI() {
+    const c = (profile && typeof profile.coins === 'number') ? profile.coins : null;
+    const a = document.getElementById('stat-coins'); if (a) a.textContent = c === null ? '—' : c;
+    const b = document.getElementById('setup-coins'); if (b) b.textContent = '🪙 ' + (c === null ? '—' : c) + (mode === 'CPU' ? '  (practice: free)' : '');
+}
+async function refreshCoins() {
+    if (!sb || !profile) return;
+    const { data, error } = await sb.from('users').select('coins_available').eq('id', profile.id).maybeSingle();
+    if (error || !data) return;
+    profile.coins = data.coins_available;
+    updateCoinUI();
+}
+async function spendCoins(amount) {
+    if (amount <= 0) return { ok: true };
+    if (!sb || !profile) return { ok: false, error: 'Coins unavailable offline' };
+    const { data, error } = await sb.rpc('spend_coins', { p_user: profile.id, p_amount: amount });
+    if (error) return { ok: false, error: /insufficient/i.test(error.message) ? 'Not enough coins' : ('Coins unavailable: ' + error.message) };
+    profile.coins = data;
+    updateCoinUI();
+    return { ok: true };
+}
+
+// ---- setup screen ----
+function savedSetupKey() { return 'cantaball_setup_' + gameRowId; }
+function clearSavedSetup() { try { if (gameRowId) localStorage.removeItem(savedSetupKey()); } catch (e) {} }
+
+function publishSetup() {
+    if (!presenceChannel) return Promise.resolve();
+    try { return presenceChannel.track({ online_at: Date.now(), ready: iAmReady, round: roundNo, setup: iAmReady ? mySetup : null }); }
+    catch (e) { return Promise.resolve(); }
+}
+
+function syncOpponentFromPresence() {
+    if (phase !== 'SETUP' || !presenceChannel || mode !== 'ONLINE') return;
+    const st = presenceChannel.presenceState();
+    const others = Object.keys(st).filter(k => k !== myToken);
+    const metas = others.length ? st[others[0]] : null;
+    const m = metas && metas.length ? metas[metas.length - 1] : null;
+    oppReady = !!(m && m.ready && m.round === roundNo);   // a stale flag from the last match doesn't count
+    oppSetup = oppReady && m.setup ? m.setup : null;
+    updateSetupStatus();
+    maybeStartMatch();
+}
+
+function openSetup(restore) {
+    mySetup = emptySetup();
+    iAmReady = false;
+    readyBusy = false;
+    oppReady = (mode === 'CPU');
+    oppSetup = mode === 'CPU' ? CPU_SETUP : null;
+    if (restore && mode === 'ONLINE' && gameRowId) {   // rejoined after paying: don't charge twice
+        try {
+            const v = JSON.parse(localStorage.getItem(savedSetupKey()));
+            if (v && v.round === roundNo && v.setup) { mySetup = normSetup(v.setup); iAmReady = true; }
+        } catch (e) {}
+    }
+    setupEndsAt = Date.now() + SETUP_SECONDS * 1000;
+    document.getElementById('setup-overlay').style.display = 'flex';
+    document.getElementById('setup-note').textContent = '';
+    renderSetup();
+    updateSetupStatus();
+    setupTick();
+    clearInterval(setupTimerId);
+    setupTimerId = setInterval(setupTick, 250);
+    publishSetup();
+    syncOpponentFromPresence();
+    if (mode === 'ONLINE') refreshCoins().then(() => { if (phase === 'SETUP') renderSetup(); });
+    maybeStartMatch();
+}
+
+function closeSetupUI() {
+    clearInterval(setupTimerId);
+    setupTimerId = null;
+    const o = document.getElementById('setup-overlay');
+    if (o) o.style.display = 'none';
+}
+
+function setupTick() {
+    if (phase !== 'SETUP') return;
+    const left = Math.max(0, Math.ceil((setupEndsAt - Date.now()) / 1000));
+    const el = document.getElementById('setup-timer');
+    el.textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+    el.classList.toggle('low', left <= 10);
+    if (left <= 0 && !iAmReady && !readyBusy) pressReady(true);   // time's up: lock in whatever is selected
+}
+
+function updateSetupStatus() {
+    const el = document.getElementById('setup-opp');
+    if (!el) return;
+    el.textContent = (mode === 'CPU' ? 'CPU' : oppName()) + ': ' + (oppReady ? 'READY ✓' : 'setting up…');
+    if (iAmReady && !oppReady) document.getElementById('setup-note').textContent = 'You are ready - waiting for ' + (mode === 'CPU' ? 'CPU' : oppName()) + '…';
+}
+
+function setStar(slot) {
+    if (iAmReady || readyBusy) return;
+    const cand = JSON.parse(JSON.stringify(mySetup));
+    cand.star = slot;
+    if (!canAfford(cand)) { showToast('Not enough coins', 'bad'); return; }
+    mySetup = cand;
+    renderSetup();
+}
+function renderSetup() {
+    const free = mode === 'CPU';
+    const dis = (iAmReady || readyBusy) ? ' disabled' : '';
+    let h = '<div class="setup-sec"><div class="setup-title"><span>⏱ GAME DURATION</span><span class="price">FREE</span></div>' +
+        '<p class="setup-desc">Choose how long the match lasts. First to 3 goals still wins immediately.</p>' +
+        '<div class="chips">';
+    GAME_DURATION_OPTIONS.forEach(min => {
+        h += '<button class="chip' + (mySetup.duration === min ? ' on' : '') + '"' + dis + ' onclick="setGameDuration(' + min + ')">' + min + ' MIN</button>';
+    });
+    h += '</div></div>';
+
+    h += '<div class="setup-sec"><div class="setup-title"><span>⭐ STAR PLAYER</span><span class="price">' + (free ? 'FREE' : STAR_COST + ' 🪙') + '</span></div>' +
+        '<p class="setup-desc">Pick one player who can take a shot from anywhere on the pitch.</p><div class="chips">' +
+        '<button class="chip' + (mySetup.star === null ? ' on' : '') + '"' + dis + ' onclick="setStar(null)">None</button>';
+    for (let i = 1; i <= 5; i++) h += '<button class="chip' + (mySetup.star === i ? ' on' : '') + '"' + dis + ' onclick="setStar(' + i + ')">' + SLOT_NAMES[i] + '</button>';
+    h += '</div></div>';
+
+    document.getElementById('setup-body').innerHTML = h;
+    const cost = free ? 0 : setupCost(mySetup);
+    document.getElementById('setup-cost').innerHTML = '<span>Total</span><span class="price">' + (free ? 'FREE (practice)' : cost + ' 🪙') + '</span>';
+    const btn = document.getElementById('setup-ready-btn');
+    btn.disabled = iAmReady || readyBusy;
+    btn.textContent = iAmReady ? 'READY ✓' : (readyBusy ? 'Saving…' : (cost > 0 ? 'READY  (-' + cost + ' 🪙)' : 'READY'));
+    updateCoinUI();
+}
+
+function setGameDuration(minutes) {
+    if (iAmReady || readyBusy) return;
+    const value = Number(minutes);
+    if (!GAME_DURATION_OPTIONS.includes(value)) return;
+    mySetup = { ...mySetup, duration: value };
+    renderSetup();
+}
+
+async function pressReady(auto) {
+    if (iAmReady || readyBusy || phase !== 'SETUP') return;
+    readyBusy = true;
+    renderSetup();
+    let cost = mode === 'CPU' ? 0 : setupCost(mySetup);
+    if (cost > 0) {
+        const r = await spendCoins(cost);
+        if (!r.ok) {
+            if (auto) { mySetup = emptySetup(); cost = 0; showToast('Setup cleared: ' + r.error, 'bad'); }
+            else { readyBusy = false; document.getElementById('setup-note').textContent = r.error; renderSetup(); return; }
+        }
+    }
+    iAmReady = true;
+    readyBusy = false;
+    if (mode === 'ONLINE' && gameRowId) {
+        try { localStorage.setItem(savedSetupKey(), JSON.stringify({ round: roundNo, setup: mySetup })); } catch (e) {}
+    }
+    document.getElementById('setup-note').textContent = '';
+    renderSetup();
+    updateSetupStatus();
+    await publishSetup();
+    maybeStartMatch();
+}
+
+function maybeStartMatch() {
+    if (phase !== 'SETUP' || !iAmReady || !oppReady) return;
+
+    const selectedDuration = normSetup(mySetup).duration;
+    const other = myTeam === TEAM_USER ? TEAM_CPU : TEAM_USER;
+    matchSetups = {};
+    matchSetups[myTeam] = normSetup(mySetup);
+
+    if (mode === 'CPU') {
+        // In practice, the player's selected duration controls the whole match.
+        matchSetups[other] = { ...normSetup(oppSetup), duration: selectedDuration };
+    } else {
+        matchSetups[other] = normSetup(oppSetup);
+        if (matchSetups[other].duration !== selectedDuration) {
+            document.getElementById('setup-note').textContent = 'Both players must choose the same game duration.';
+            return;
+        }
+    }
+    beginPlay();
+}
+
+function beginPlay() {
+    phase = 'PLAY';
+    closeSetupUI();
+    applySetupRoles();
+    matchDurationMs = (matchSetups && matchSetups[myTeam] ? matchSetups[myTeam].duration : DEFAULT_GAME_DURATION_MINUTES) * 60 * 1000;
+    clockMs = matchDurationMs;
+    clockLast = Date.now();
+    timeUp = false;
+    updateActionButtons();
+    updateScoreboard();
+    matchTimerEl.textContent = formatClock(clockMs);
+    turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : (mode === 'CPU' ? 'CPU THINKING...' : "OPPONENT'S TURN");
+    showToast('Kick-off! Match started', 'good');
+    if (mode === 'ONLINE' && myTeam === TEAM_USER) pushGameState();
+    else if (mode === 'CPU') saveCpuGame();
+}
+
+function enterGame() {
+    lobbyFrame.style.display = 'none';
+    tableFrame.style.display = 'flex';
+    inLobby = false;
+    opponentLeftHandled = false;
+    if (mode !== 'ONLINE' && !resumingCpu) {
+        matchSetups = null;
+        phase = 'SETUP';
+        roundNo = 1;
+            initTeams();
+        matchDurationMs = DEFAULT_GAME_DURATION_MINUTES * 60 * 1000;
+        clockMs = matchDurationMs;
+        timeUp = false;
+    }
+    resumingCpu = false;
+    resultRecorded = false;
+    clockLast = Date.now();
+    matchTimerEl.textContent = formatClock(clockMs);
+    matchTimerEl.classList.toggle('low', clockMs <= 30000);
+    resizeCanvasDisplay();
+    updateScoreboard();
+    updateActionButtons();
+    turnIndicator.textContent = currentTurn === myTeam ? 'YOUR TURN' : (mode === 'CPU' ? 'CPU THINKING...' : "OPPONENT'S TURN");
+    if (!window.__renderStarted) {
+        window.__renderStarted = true;
+        requestAnimationFrame(render);
+    }
+    if (phase === 'SETUP') openSetup(mode === 'ONLINE'); else closeSetupUI();
+    if (mode === 'CPU' && currentTurn === TEAM_CPU && phase === 'PLAY') setTimeout(playCpuTurn, 800);
+}
+
+function saveSession() {
+    if (!gameRowId || !myToken) return;
+    try {
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ gameId: gameRowId, room: roomCode, token: myToken, team: myTeam, savedAt: Date.now() }));
+    } catch (e) {}
+}
+function loadSession() {
+    try {
+        const v = JSON.parse(localStorage.getItem(SESSION_KEY));
+        if (!v || !v.token || !v.gameId) return null;
+        if (Date.now() - v.savedAt > SESSION_MAX_AGE) { clearSession(); return null; }
+        return v;
+    } catch (e) { return null; }
+}
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (e) {} }
+
+// CPU match snapshot (saved at every turn boundary)
+function saveCpuGame() {
+    try { localStorage.setItem(CPU_KEY, JSON.stringify({ state: serializeState(), savedAt: Date.now() })); } catch (e) {}
+}
+function clearCpuGame() {
+    try { localStorage.removeItem(CPU_KEY); } catch (e) {}
+    refreshResumeButton();
+}
+function refreshResumeButton() {
+    let ok = false;
+    try {
+        const v = JSON.parse(localStorage.getItem(CPU_KEY));
+        ok = !!(v && v.state && Date.now() - v.savedAt < SESSION_MAX_AGE);
+    } catch (e) {}
+    resumeCpuBtn.style.display = ok ? 'block' : 'none';
+}
+function resumeCpuGame() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CPU_KEY)); } catch (e) {}
+    if (!saved || !saved.state) { refreshResumeButton(); return; }
+    mode = 'CPU';
+    myTeam = TEAM_USER;
+    opponentProfile = null;
+    refreshNames();
+    presenceDot.style.display = 'none';
+    resumingCpu = true;
+    applyState(saved.state, true);
+    enterGame();
+    showToast('Match resumed', 'info');
+}
+
+// ---- Registered player (Supabase `users` table; id doubles as the game player token) ----
+const PROFILE_KEY = 'cantaball_profile_v1';
+let profile = null;           // {id, name, country, gender, synced}
+let opponentProfile = null;   // {name, country, gender} of the other human player
+const registerFrame = document.getElementById('register-frame');
+const COUNTRIES = "Afghanistan,Albania,Algeria,Andorra,Angola,Antigua and Barbuda,Argentina,Armenia,Australia,Austria,Azerbaijan,Bahamas,Bahrain,Bangladesh,Barbados,Belarus,Belgium,Belize,Benin,Bhutan,Bolivia,Bosnia and Herzegovina,Botswana,Brazil,Brunei,Bulgaria,Burkina Faso,Burundi,Cabo Verde,Cambodia,Cameroon,Canada,Central African Republic,Chad,Chile,China,Colombia,Comoros,Congo,Costa Rica,Côte d'Ivoire,Croatia,Cuba,Cyprus,Czechia,DR Congo,Denmark,Djibouti,Dominica,Dominican Republic,Ecuador,Egypt,El Salvador,Equatorial Guinea,Eritrea,Estonia,Eswatini,Ethiopia,Fiji,Finland,France,Gabon,Gambia,Georgia,Germany,Ghana,Greece,Grenada,Guatemala,Guinea,Guinea-Bissau,Guyana,Haiti,Honduras,Hungary,Iceland,India,Indonesia,Iran,Iraq,Ireland,Israel,Italy,Jamaica,Japan,Jordan,Kazakhstan,Kenya,Kiribati,Kosovo,Kuwait,Kyrgyzstan,Laos,Latvia,Lebanon,Lesotho,Liberia,Libya,Liechtenstein,Lithuania,Luxembourg,Madagascar,Malawi,Malaysia,Maldives,Mali,Malta,Marshall Islands,Mauritania,Mauritius,Mexico,Micronesia,Moldova,Monaco,Mongolia,Montenegro,Morocco,Mozambique,Myanmar,Namibia,Nauru,Nepal,Netherlands,New Zealand,Nicaragua,Niger,Nigeria,North Korea,North Macedonia,Norway,Oman,Pakistan,Palau,Palestine,Panama,Papua New Guinea,Paraguay,Peru,Philippines,Poland,Portugal,Qatar,Romania,Russia,Rwanda,Saint Kitts and Nevis,Saint Lucia,Saint Vincent and the Grenadines,Samoa,San Marino,São Tomé and Príncipe,Saudi Arabia,Senegal,Serbia,Seychelles,Sierra Leone,Singapore,Slovakia,Slovenia,Solomon Islands,Somalia,South Africa,South Korea,South Sudan,Spain,Sri Lanka,Sudan,Suriname,Sweden,Switzerland,Syria,Taiwan,Tajikistan,Tanzania,Thailand,Timor-Leste,Togo,Tonga,Trinidad and Tobago,Tunisia,Türkiye,Turkmenistan,Tuvalu,Uganda,Ukraine,United Arab Emirates,United Kingdom,United States,Uruguay,Uzbekistan,Vanuatu,Vatican City,Venezuela,Vietnam,Yemen,Zambia,Zimbabwe,Other".split(',');
+
+function loadProfile() {
+    try {
+        const v = JSON.parse(localStorage.getItem(PROFILE_KEY));
+        if (v && v.id && v.name && v.country && v.gender) return v;
+    } catch (e) {}
+    return null;
+}
+function saveProfileLocal() { try { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch (e) {} }
+
+async function syncProfile() {
+    if (!sb || !profile) return { ok: false, error: { message: 'no connection' } };
+    const { error } = await sb.from('users').upsert({
+        id: profile.id, name: profile.name, country: profile.country, gender: profile.gender, updated_at: new Date().toISOString()
+    });
+    if (!error) { profile.synced = true; saveProfileLocal(); }
+    return { ok: !error, error };
+}
+
+async function ensureProfile() {
+    if (!profile) { showRegister(false); return false; }
+    if (profile.synced) return true;
+    const r = await syncProfile();
+    if (!r.ok) {
+        setLobbyStatus('Could not save your profile online: ' + (r.error && r.error.message ? r.error.message : 'no connection'));
+        return false;
+    }
+    return true;
+}
+
+function oppName() {
+    if (mode === 'CPU') return 'CPU';
+    return opponentProfile && opponentProfile.name ? opponentProfile.name : 'Opponent';
+}
+
+// Left scoreboard box is always me, right box is always the opponent (colours follow the piece colours).
+function refreshNames() {
+    labelP1.textContent = myDisplayName();
+    labelP1.title = profile ? profile.country : '';
+    labelP2.textContent = mode === 'CPU' ? 'CPU' : (opponentProfile && opponentProfile.name ? opponentProfile.name.toUpperCase() : 'OPPONENT');
+    labelP2.title = opponentProfile && opponentProfile.country ? opponentProfile.country : '';
+    labelP1.style.color = myTeam === TEAM_USER ? '#ff4d4d' : '#4d94ff';
+    labelP2.style.color = myTeam === TEAM_USER ? '#4d94ff' : '#ff4d4d';
+    updateScoreboard();
+}
+
+function loadOpponentProfile(row) {
+    opponentProfile = null;
+    const oppToken = myTeam === TEAM_USER ? row.player_b_token : row.player_a_token;
+    if (!sb || !oppToken) return;
+    sb.from('users').select('name,country,gender').eq('id', oppToken).maybeSingle().then(({ data }) => {
+        if (data && mode === 'ONLINE' && !inLobby) { opponentProfile = data; refreshNames(); }
+    }, () => {});
+}
+
+function buildCountryOptions() {
+    const sel = document.getElementById('reg-country');
+    sel.innerHTML = '';
+    const first = document.createElement('option');
+    first.value = ''; first.textContent = 'Select country';
+    sel.appendChild(first);
+    COUNTRIES.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+}
+
+function showRegister(isEdit) {
+    lobbyFrame.style.display = 'none';
+    registerFrame.style.display = 'block';
+    document.getElementById('register-subtitle').textContent = isEdit ? 'Edit your player profile' : 'Create your player profile to get started';
+    document.getElementById('reg-btn').textContent = isEdit ? 'SAVE PROFILE' : 'START PLAYING';
+    document.getElementById('reg-cancel').style.display = isEdit ? 'inline-block' : 'none';
+    document.getElementById('reg-error').textContent = '';
+    let oldName = '';
+    try { oldName = localStorage.getItem(NAME_KEY) || ''; } catch (e) {}
+    document.getElementById('reg-name').value = isEdit && profile ? profile.name : oldName;
+    document.getElementById('reg-country').value = isEdit && profile ? profile.country : '';
+    document.getElementById('reg-gender').value = isEdit && profile ? profile.gender : '';
+}
+
+function editProfile() { showRegister(true); }
+
+function enterLobbyScreen() {
+    registerFrame.style.display = 'none';
+    lobbyFrame.style.display = 'block';
+    myName = profile ? profile.name : myName;
+    refreshProfile();
+    updateCoinUI();
+    refreshCoins();
+}
+
+async function submitRegistration() {
+    const err = document.getElementById('reg-error');
+    const name = document.getElementById('reg-name').value.trim().replace(/\s+/g, ' ');
+    const country = document.getElementById('reg-country').value;
+    const gender = document.getElementById('reg-gender').value;
+    if (name.length < 2 || name.length > 12) { err.textContent = 'Enter a name between 2 and 12 characters.'; return; }
+    if (!country) { err.textContent = 'Please choose your country.'; return; }
+    if (!gender) { err.textContent = 'Please choose your gender.'; return; }
+    err.textContent = '';
+
+    profile = { id: profile ? profile.id : uuid(), name, country, gender, synced: false };
+    saveProfileLocal();
+    try { localStorage.setItem(NAME_KEY, name); } catch (e) {}
+
+    const btn = document.getElementById('reg-btn');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    const r = await syncProfile();
+    btn.disabled = false;
+    btn.textContent = label;
+
+    enterLobbyScreen();
+    if (!r.ok) showToast('Profile saved on this device - it will sync when you go online', 'info');
+}
+
+function initProfileFlow() {
+    buildCountryOptions();
+    profile = loadProfile();
+    if (profile) { enterLobbyScreen(); tryResumeSession(); }
+    else showRegister(false);
+}
+
+// ---- Player profile (name + lifetime stats, stored on this device) ----
+const NAME_KEY = 'cantaball_name';
+const STATS_KEY = 'cantaball_stats';
+let myName = '';
+let resultRecorded = false;
+
+function myDisplayName() { return (myName || 'YOU').toUpperCase(); }
+function getStats() {
+    try { return Object.assign({ played: 0, won: 0, lost: 0, drawn: 0, goals: 0 }, JSON.parse(localStorage.getItem(STATS_KEY)) || {}); }
+    catch (e) { return { played: 0, won: 0, lost: 0, drawn: 0, goals: 0 }; }
+}
+function refreshProfile() {
+    const st = getStats();
+    document.getElementById('stat-played').textContent = st.played;
+    document.getElementById('stat-won').textContent = st.won;
+    document.getElementById('stat-goals').textContent = st.goals;
+    document.getElementById('stat-rate').textContent = (st.played ? Math.round(st.won / st.played * 100) : 0) + '%';
+    document.getElementById('avatar').textContent = (myName || 'P').charAt(0).toUpperCase();
+    const nd = document.getElementById('player-name-display');
+    nd.textContent = '';
+    nd.appendChild(document.createTextNode(myName || 'Player'));
+    if (profile) { const sm = document.createElement('small'); sm.textContent = profile.country; nd.appendChild(sm); }
+    const ed = document.createElement('span'); ed.className = 'edit-link'; ed.textContent = '✎ Edit'; ed.onclick = editProfile; nd.appendChild(ed);
+}
+function saveName(v) {
+    myName = String(v || '').trim().slice(0, 12);
+    try { localStorage.setItem(NAME_KEY, myName); } catch (e) {}
+    refreshProfile();
+}
+function initProfile() { refreshProfile(); }
+function recordResult(mine, theirs) {
+    if (resultRecorded) return;
+    resultRecorded = true;
+    const sig = (gameRowId || 'cpu') + '|' + score.USER + '-' + score.CPU;
+    if (gameRowId) {   // don't double count when an online result screen is reloaded
+        try { if (localStorage.getItem('cantaball_last_result') === sig) return; localStorage.setItem('cantaball_last_result', sig); } catch (e) {}
+    }
+    const st = getStats();
+    st.played++; st.goals += mine;
+    if (mine > theirs) st.won++; else if (mine < theirs) st.lost++; else st.drawn++;
+    try { localStorage.setItem(STATS_KEY, JSON.stringify(st)); } catch (e) {}
+    refreshProfile();
+}
+
+// Rejoin an online match from localStorage (or ?room=&pid= in the URL).
+async function tryResumeSession() {
+    const params = new URLSearchParams(window.location.search);
+    let sess = loadSession();
+    if (!sess && params.get('room') && params.get('pid')) sess = { room: params.get('room'), token: params.get('pid') };
+    if (!sess || !requireSupabase()) return false;
+
+    myToken = sess.token;
+    setLobbyStatus('Reconnecting to your match...');
+
+    let q = sb.from('games').select('*');
+    q = sess.gameId ? q.eq('id', sess.gameId) : q.eq('room_code', sess.room);
+    const { data: row } = await q.maybeSingle();
+
+    const fail = (msg) => { clearSession(); myToken = null; setLobbyStatus(msg); history.replaceState(null, '', window.location.pathname); return false; };
+    if (!row) return fail('Your last match is no longer available.');
+    if (row.player_a_token !== sess.token && row.player_b_token !== sess.token) return fail('Your last match is no longer available.');
+    if (row.state && row.state.leftBy) return fail('Your last opponent left the match.');
+
+    gameRowId = row.id;
+    roomCode = row.room_code || sess.room || null;
+    myTeam = row.player_a_token === sess.token ? TEAM_USER : TEAM_CPU;
+
+    if (row.status === 'waiting') {
+        roomCodeBox.textContent = roomCode || '';
+        roomCodeBox.style.display = 'block';
+        lobbyCancel.style.display = 'inline-block';
+        setLobbyStatus('Waiting for opponent to join with this code...');
+        subscribeWaitingForOpponent();
+        return true;
+    }
+
+    beginOnlineMatch(row);
+    showToast('Rejoined your match', 'good');
+    return true;
+}
+
+function updateCanvasOrientation() {
+    isPortrait = window.innerWidth <= 600 && window.innerHeight > window.innerWidth;
+    if (isPortrait) { canvas.width = 550; canvas.height = 1000; }
+    else { canvas.width = 1000; canvas.height = 550; }
+}
+
+function resizeCanvasDisplay() {
+    const availW = canvasContainer.clientWidth || window.innerWidth;
+    const availH = window.innerHeight * 0.65;
+    const aspect = canvas.width / canvas.height;
+    let dispW = availW;
+    let dispH = dispW / aspect;
+    if (dispH > availH) { dispH = availH; dispW = dispH * aspect; }
+    canvas.style.width = Math.round(dispW) + 'px';
+    canvas.style.height = Math.round(dispH) + 'px';
+}
+
+function drawStar(cx, cy, outer, inner) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+        const r = i % 2 === 0 ? outer : inner;
+        const a = -Math.PI / 2 + i * Math.PI / 5;
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+}
+
+class Piece {
+    constructor(id, team, role, x, y, angle) {
+        this.id = id;
+        this.team = team;
+        this.role = role;
+        this.x = x;
+        this.y = y;
+        this.angle = (typeof angle === 'number') ? angle : 0; // facing direction (radians)
+    }
+
+    draw() {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        ctx.shadowBlur = 6;
+        ctx.shadowOffsetX = 3;
+        ctx.shadowOffsetY = 4;
+
+        if (selectedPiece === this) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, PieceRadius + 7, 0, Math.PI * 2);
+            ctx.strokeStyle = selectedAction === 'SHOOT' ? '#ff0055' : (selectedAction === 'PASS' ? '#ffcc00' : '#00ffff');
+            ctx.lineWidth = 3;
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Protruding front (the "nose") - shows which way the player faces.
+        const a = this.angle || 0;
+        ctx.beginPath();
+        ctx.moveTo(this.x + Math.cos(a) * (PieceRadius + 10), this.y + Math.sin(a) * (PieceRadius + 10));
+        ctx.lineTo(this.x + Math.cos(a - 0.65) * (PieceRadius - 2), this.y + Math.sin(a - 0.65) * (PieceRadius - 2));
+        ctx.lineTo(this.x + Math.cos(a + 0.65) * (PieceRadius - 2), this.y + Math.sin(a + 0.65) * (PieceRadius - 2));
+        ctx.closePath();
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, PieceRadius, 0, Math.PI * 2);
+        const colorMain = this.team === TEAM_USER ? '#d32f2f' : '#1976d2';
+        const colorLight = this.team === TEAM_USER ? '#ef5350' : '#42a5f5';
+        const grad = ctx.createRadialGradient(this.x - 4, this.y - 4, 2, this.x, this.y, PieceRadius);
+        grad.addColorStop(0, colorLight);
+        grad.addColorStop(1, colorMain);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        const isStar = this.role === 'STAR';
+        ctx.strokeStyle = isStar ? '#ffd700' : '#222';
+        ctx.lineWidth = isStar ? 3 : 2;
+        ctx.stroke();
+
+        if (isStar) {
+            drawStar(this.x, this.y, 10, 4.5);
+            ctx.fillStyle = '#ffd700';
+            ctx.fill();
+            ctx.strokeStyle = '#7a5a00';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+}
+
+function initTeams() {
+    updateCanvasOrientation();
+    resizeCanvasDisplay();
+    const midX = canvas.width / 2;
+    const midY = canvas.height / 2;
+
+    // No goalkeepers: all 5 players per side are normal field players.
+    if (isPortrait) {
+        pieces = [
+            new Piece(1, TEAM_USER, 'FIELD', midX, canvas.height - 110),
+            new Piece(2, TEAM_USER, 'FIELD', midX - 120, canvas.height - 200),
+            new Piece(3, TEAM_USER, 'FIELD', midX + 120, canvas.height - 200),
+            new Piece(4, TEAM_USER, 'FIELD', midX, canvas.height - 320),
+            new Piece(5, TEAM_USER, 'FIELD', midX, canvas.height - 420),
+
+            new Piece(6, TEAM_CPU, 'FIELD', midX, 110),
+            new Piece(7, TEAM_CPU, 'FIELD', midX - 120, 200),
+            new Piece(8, TEAM_CPU, 'FIELD', midX + 120, 200),
+            new Piece(9, TEAM_CPU, 'FIELD', midX, 320),
+            new Piece(10, TEAM_CPU, 'FIELD', midX, 420)
+        ];
+    } else {
+        pieces = [
+            new Piece(1, TEAM_USER, 'FIELD', 110, midY),
+            new Piece(2, TEAM_USER, 'FIELD', 200, midY - 120),
+            new Piece(3, TEAM_USER, 'FIELD', 200, midY + 120),
+            new Piece(4, TEAM_USER, 'FIELD', 320, midY),
+            new Piece(5, TEAM_USER, 'FIELD', 420, midY),
+
+            new Piece(6, TEAM_CPU, 'FIELD', canvas.width - 110, midY),
+            new Piece(7, TEAM_CPU, 'FIELD', canvas.width - 200, midY - 120),
+            new Piece(8, TEAM_CPU, 'FIELD', canvas.width - 200, midY + 120),
+            new Piece(9, TEAM_CPU, 'FIELD', canvas.width - 320, midY),
+            new Piece(10, TEAM_CPU, 'FIELD', canvas.width - 420, midY)
+        ];
+    }
+
+    // Everyone starts facing the goal they attack.
+    pieces.forEach(p => {
+        p.angle = isPortrait
+            ? (p.team === TEAM_USER ? -Math.PI / 2 : Math.PI / 2)
+            : (p.team === TEAM_USER ? 0 : Math.PI);
+    });
+
+    if (matchSetups) applySetupRoles();
+    resetBallToCenter();
+}
+
+function resetBallToCenter() {
+    ball.x = canvas.width / 2;
+    ball.y = canvas.height / 2;
+    ball.carrier = null;
+    checkBallPossession();
+}
+
+// Goal kick restart (no keeper): the defending player nearest their own goal collects the ball.
+function resetGoalKick(defendingTeam) {
+    let goalX, goalY;
+    if (isPortrait) {
+        goalY = defendingTeam === TEAM_USER ? canvas.height - GoalWidth - 10 : GoalWidth + 10;
+        goalX = canvas.width / 2;
+    } else {
+        goalX = defendingTeam === TEAM_USER ? GoalWidth + 10 : canvas.width - GoalWidth - 10;
+        goalY = canvas.height / 2;
+    }
+
+    let taker = null;
+    let best = Infinity;
+    pieces.filter(p => p.team === defendingTeam).forEach(p => {
+        const d = Math.hypot(p.x - goalX, p.y - goalY);
+        if (d < best) { best = d; taker = p; }
+    });
+
+    if (taker) {
+        ball.x = taker.x;
+        ball.y = taker.y;
+        ball.carrier = taker;
+    } else {
+        ball.x = goalX;
+        ball.y = goalY;
+        ball.carrier = null;
+        checkBallPossession();
+    }
+}
+
+function checkBallPossession() {
+    let closest = null;
+    let minDist = PieceRadius + BallRadius + 5;
+    pieces.forEach(p => {
+        const d = Math.hypot(p.x - ball.x, p.y - ball.y);
+        if (d < minDist) { minDist = d; closest = p; }
+    });
+    ball.carrier = closest;
+}
+
+// Normal players must be within ShootRange of the goal; the STAR player can shoot from anywhere.
+function canShootFrom(piece) {
+    if (piece.role === 'STAR') return true;
+    const g = getEnemyGoalCenter(piece.team);
+    return Math.hypot(g.x - piece.x, g.y - piece.y) <= ShootRange;
+}
+
+function getEnemyGoalCenter(team) {
+    if (isPortrait) return { x: canvas.width / 2, y: team === TEAM_USER ? 0 : canvas.height };
+    return { x: team === TEAM_USER ? canvas.width : 0, y: canvas.height / 2 };
+}
+
+// ---- Facing / tackle helpers ----
+function angleDiff(a, b) {
+    let d = a - b;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return Math.abs(d);
+}
+
+// Which side of the ball carrier is a tackler coming from? ('FRONT' | 'SIDE' | 'BACK')
+function tackleSide(carrier, fromX, fromY) {
+    const approach = Math.atan2(fromY - carrier.y, fromX - carrier.x);
+    const d = angleDiff(approach, carrier.angle || 0);
+    if (d <= FRONT_HALF_ANGLE) return 'FRONT';
+    if (d >= BACK_HALF_ANGLE) return 'BACK';
+    return 'SIDE';
+}
+
+function setAction(action) {
+    if (currentTurn !== myTeam || !selectedPiece || isAnimating || isReplaying) return;
+
+    if (action === 'SHOOT') {
+        if (ball.carrier !== selectedPiece) return;
+        if (!canShootFrom(selectedPiece)) { showLog("Too far to shoot!"); return; }
+    }
+
+    if (action === 'PASS' && ball.carrier !== selectedPiece) {
+        showLog("Must possess ball to pass!");
+        return;
+    }
+
+    selectedAction = action;
+    updateActionButtons();
+}
+
+function setTargetZone(zone) {
+    if (currentTurn !== myTeam || isAnimating || isReplaying) return;
+    targetZone = zone;
+    targetLeft.classList.remove('active-target');
+    targetCenter.classList.remove('active-target');
+    targetRight.classList.remove('active-target');
+    if (zone === 'LEFT') targetLeft.classList.add('active-target');
+    if (zone === 'CENTER') targetCenter.classList.add('active-target');
+    if (zone === 'RIGHT') targetRight.classList.add('active-target');
+}
+
+function updateActionButtons() {
+    btnMove.className = 'action-btn';
+    btnPass.className = 'action-btn';
+    btnShoot.className = 'action-btn';
+    targetSelector.style.display = 'none';
+
+    if (currentTurn === myTeam && selectedPiece && !isAnimating && !isReplaying) {
+        btnMove.classList.add('active');
+        if (selectedAction === 'MOVE') btnMove.classList.add('selected');
+
+        if (ball.carrier === selectedPiece) {
+            btnPass.classList.add('active');
+            if (selectedAction === 'PASS') btnPass.classList.add('selected');
+
+            if (canShootFrom(selectedPiece)) {
+                btnShoot.classList.add('active');
+                if (selectedAction === 'SHOOT') {
+                    btnShoot.classList.add('selected');
+                    targetSelector.style.display = 'flex';
+                }
+            }
+        }
+    }
+    updateReplayButton();
+}
+
+function switchTurn(nextTeam) {
+    selectedPiece = null;
+    selectedAction = null;
+    pointerPos = null;
+    updateActionButtons();
+
+    if (score.USER >= WIN_SCORE || score.CPU >= WIN_SCORE) {
+        matchOver = true;
+        showMatchEnd();
+        pushGameState();
+        return;
+    }
+
+    currentTurn = nextTeam ? nextTeam : (currentTurn === TEAM_USER ? TEAM_CPU : TEAM_USER);
+    turnIndicator.textContent = currentTurn === myTeam ? "YOUR TURN" : (mode === 'CPU' ? "CPU THINKING..." : "OPPONENT'S TURN");
+    turnIndicator.style.borderColor = currentTurn === myTeam ? "#ff4d4d" : "#4d94ff";
+
+    if (mode === 'CPU') saveCpuGame();
+    if (mode === 'CPU' && currentTurn === TEAM_CPU) {
+        setTimeout(playCpuTurn, 800);
+    } else if (mode === 'ONLINE') {
+        pushGameState();
+    }
+}
+
+function getCanvasCoordinates(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    let clientX = e.clientX;
+    let clientY = e.clientY;
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else if (e.changedTouches && e.changedTouches.length > 0) {
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+    }
+    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+}
+
+function handlePointerInput(e) {
+    if (phase !== 'PLAY' || currentTurn !== myTeam || isAnimating || isReplaying || matchOver) return;
+
+    const pos = getCanvasCoordinates(e);
+    const clickX = pos.x;
+    const clickY = pos.y;
+
+    // In PASS mode with the ball, tapping a teammate completes the pass.
+    if (selectedAction === 'PASS' && selectedPiece && ball.carrier === selectedPiece) {
+        let passTarget = null;
+        let minTeammateDist = Infinity;
+        pieces.filter(p => p.team === myTeam && p !== selectedPiece).forEach(teammate => {
+            const d = Math.hypot(teammate.x - clickX, teammate.y - clickY);
+            if (d < TouchHitboxRadius + 10 && d < minTeammateDist) { minTeammateDist = d; passTarget = teammate; }
+        });
+        if (passTarget) { handlePassAction(selectedPiece, passTarget); return; }
+    }
+
+    const clickedPiece = pieces.find(p => p.team === myTeam && Math.hypot(p.x - clickX, p.y - clickY) <= TouchHitboxRadius);
+    if (clickedPiece) {
+        selectedPiece = clickedPiece;
+        selectedAction = 'MOVE';
+        updateActionButtons();
+        if (clickedPiece.role === 'STAR' && ball.carrier === clickedPiece) showLog('⭐ Star player: can shoot from anywhere!');
+        return;
+    }
+
+    if (selectedPiece) {
+        if (selectedAction === 'MOVE') handleMoveAction(selectedPiece, clickX, clickY);
+        else if (selectedAction === 'SHOOT') showLog('Pick LEFT / CENTER / RIGHT, then press TAKE SHOT');
+        else if (selectedAction === 'PASS') showLog("Tap a teammate to complete pass!");
+    }
+}
+
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); pointerPos = getCanvasCoordinates(e); }, { passive: false });
+canvas.addEventListener('touchmove', (e) => { e.preventDefault(); pointerPos = getCanvasCoordinates(e); }, { passive: false });
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); handlePointerInput(e); pointerPos = null; }, { passive: false });
+canvas.addEventListener('click', (e) => { handlePointerInput(e); });
+
+function resolveMovementWithCollisions(piece, destX, destY) {
+    destX = Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, destX));
+    destY = Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, destY));
+
+    const totalDist = Math.hypot(destX - piece.x, destY - piece.y);
+    if (totalDist > MoveRadius) {
+        const angle = Math.atan2(destY - piece.y, destX - piece.x);
+        destX = piece.x + Math.cos(angle) * MoveRadius;
+        destY = piece.y + Math.sin(angle) * MoveRadius;
+    }
+
+    const dx = destX - piece.x;
+    const dy = destY - piece.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance === 0) return { finalX: piece.x, finalY: piece.y, hitPiece: null };
+
+    const dirX = dx / distance;
+    const dirY = dy / distance;
+    const minSpace = PieceRadius * 2 + 2;
+
+    let closestHitDist = distance;
+    let hitPiece = null;
+
+    pieces.forEach(other => {
+        if (other === piece) return;
+        const ox = other.x - piece.x;
+        const oy = other.y - piece.y;
+        const proj = ox * dirX + oy * dirY;
+
+        if (proj > 0 && proj < closestHitDist + minSpace) {
+            const perpDistSq = (ox * ox + oy * oy) - (proj * proj);
+            if (perpDistSq < minSpace * minSpace) {
+                const hitOffset = Math.sqrt(Math.max(0, (minSpace * minSpace) - perpDistSq));
+                const actualTravel = proj - hitOffset;
+                if (actualTravel < closestHitDist) {
+                    closestHitDist = Math.max(0, actualTravel);
+                    hitPiece = other;
+                }
+            }
+        }
+    });
+
+    return { finalX: piece.x + dirX * closestHitDist, finalY: piece.y + dirY * closestHitDist, hitPiece };
+}
+
+const FOUL_CLEAR_RADIUS = 160;
+
+// After a foul the fouled player keeps the ball and every opposing player inside the
+// clear radius is moved back (and turned to face the ball) so the restart is unobstructed.
+function restartAfterFoul(carrier, done) {
+    const cw = canvas.width, ch = canvas.height;
+    const clamp = (v, max) => Math.max(PieceRadius, Math.min(max - PieceRadius, v));
+    const targets = pieces.map(p => ({ id: p.id, x: p.x, y: p.y, angle: p.angle }));
+    const movers = [];
+
+    pieces.forEach((p, i) => {
+        if (p.team === carrier.team) return;
+        let dx = p.x - carrier.x, dy = p.y - carrier.y;
+        let d = Math.hypot(dx, dy);
+        if (d >= FOUL_CLEAR_RADIUS) return;
+        if (d < 1) { dx = -Math.cos(carrier.angle); dy = -Math.sin(carrier.angle); d = 1; }
+        targets[i].x = clamp(carrier.x + (dx / d) * FOUL_CLEAR_RADIUS, cw);
+        targets[i].y = clamp(carrier.y + (dy / d) * FOUL_CLEAR_RADIUS, ch);
+        movers.push(i);
+    });
+
+    // keep pushed players from ending up stacked on top of anyone
+    const minGap = PieceRadius * 2 + 6;
+    for (let iter = 0; iter < 6; iter++) {
+        movers.forEach(i => {
+            targets.forEach((o, j) => {
+                if (i === j) return;
+                let dx = targets[i].x - o.x, dy = targets[i].y - o.y;
+                let d = Math.hypot(dx, dy);
+                if (d < minGap) {
+                    if (d < 0.01) { dx = 1; dy = 0; d = 1; }
+                    targets[i].x = clamp(targets[i].x + (dx / d) * (minGap - d), cw);
+                    targets[i].y = clamp(targets[i].y + (dy / d) * (minGap - d), ch);
+                }
+            });
+        });
+    }
+
+    movers.forEach(i => { targets[i].angle = Math.atan2(carrier.y - targets[i].y, carrier.x - targets[i].x); });
+
+    if (movers.length === 0) { done(); return; }
+    isAnimating = true;
+    animateRemoteUpdate(pieces, targets, ball.x, ball.y, () => { isAnimating = false; done(); });
+}
+
+function handleMoveAction(piece, targetX, targetY) {
+    const beforeSnap = snapshotBoard();
+    const startX = piece.x;
+    const startY = piece.y;
+    const moveRes = resolveMovementWithCollisions(piece, targetX, targetY);
+
+    // The player turns to face the direction they run.
+    if (Math.hypot(moveRes.finalX - startX, moveRes.finalY - startY) > 1) {
+        piece.angle = Math.atan2(moveRes.finalY - startY, moveRes.finalX - startX);
+    }
+
+    animateMovement(piece, moveRes.finalX, moveRes.finalY, () => {
+        let logMsg = null;
+        let logType = null;
+        let foulCarrier = null;
+        const hit = moveRes.hitPiece;
+
+        if (hit) {
+            if (ball.carrier === hit && hit.team !== piece.team) {
+                // Only a tackle from the FRONT wins the ball. Side / back = foul, carrier keeps it.
+                const side = tackleSide(hit, startX, startY);
+                if (side === 'FRONT') {
+                    ball.carrier = piece;
+                    ball.x = piece.x;
+                    ball.y = piece.y;
+                    logMsg = "Clean Tackle! Ball won";
+                    logType = 'good';
+                } else {
+                    logMsg = side === 'BACK' ? "FOUL! Tackle from behind - free kick" : "FOUL! Tackle from the side - free kick";
+                    logType = 'foul';
+                    foulCarrier = hit;
+                }
+            } else if (!ball.carrier && Math.hypot(piece.x - ball.x, piece.y - ball.y) < PieceRadius + BallRadius + 15) {
+                ball.carrier = piece;
+                logMsg = "Ball Recovered!";
+            } else {
+                logMsg = "Blocked by Player!";
+            }
+        } else if (!ball.carrier) {
+            if (Math.hypot(piece.x - ball.x, piece.y - ball.y) < PieceRadius + BallRadius + 15) {
+                ball.carrier = piece;
+                logMsg = "Ball Recovered!";
+            }
+        }
+
+        if (logMsg) logAndToast(logMsg, logType);
+
+        if (foulCarrier) {
+            // fouled player keeps the ball; opposition is cleared away, then the fouled team plays on
+            restartAfterFoul(foulCarrier, () => {
+                recordAction('MOVE', logMsg, beforeSnap);
+                switchTurn();
+            });
+            return;
+        }
+
+        recordAction('MOVE', logMsg || 'Move', beforeSnap);
+        switchTurn();
+    });
+}
+
+function handlePassAction(passer, receiver) {
+    const beforeSnap = snapshotBoard();
+    passer.angle = Math.atan2(receiver.y - passer.y, receiver.x - passer.x);
+    isAnimating = true;
+    ball.carrier = null;
+
+    let interceptedBy = null;
+    const enemyTeam = passer.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+
+    pieces.filter(p => p.team === enemyTeam).forEach(enemy => {
+        const distToLane = distToSegment({ x: enemy.x, y: enemy.y }, { x: passer.x, y: passer.y }, { x: receiver.x, y: receiver.y });
+        if (distToLane < PieceRadius + 10 && Math.random() < 0.6) interceptedBy = enemy;
+    });
+
+    const targetPos = interceptedBy ? { x: interceptedBy.x, y: interceptedBy.y } : { x: receiver.x, y: receiver.y };
+
+    animateBall(targetPos.x, targetPos.y, () => {
+        let logMsg;
+        if (interceptedBy) { ball.carrier = interceptedBy; logMsg = "Pass Intercepted!"; }
+        else { ball.carrier = receiver; logMsg = "Pass Complete!"; }
+        logAndToast(logMsg);
+        isAnimating = false;
+        recordAction('PASS', logMsg, beforeSnap);
+        switchTurn();
+    });
+}
+
+const SHOT_BLOCK_RADIUS = PieceRadius + 12;
+
+// Where a shot aimed at LEFT / CENTER / RIGHT ends up inside the goal being attacked by `team`.
+function getShotTarget(team, zone) {
+    const GY = isPortrait ? canvas.width / 2 - GoalHeight / 2 : canvas.height / 2 - GoalHeight / 2;
+    const off = GoalHeight / 4;
+    const pos = zone === 'LEFT' ? GY + off : (zone === 'RIGHT' ? GY + GoalHeight - off : GY + GoalHeight / 2);
+    if (isPortrait) return { x: pos, y: team === TEAM_USER ? GoalWidth : canvas.height - GoalWidth };
+    return { x: team === TEAM_USER ? canvas.width - GoalWidth : GoalWidth, y: pos };
+}
+
+// The first opposing player standing on the shot line (in front of the shooter), or null.
+// The aiming line and the real shot both use this, so what you see is what happens.
+function findShotBlocker(shooter, tx, ty) {
+    const dx = tx - shooter.x, dy = ty - shooter.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return null;
+    let best = null, bestT = Infinity;
+    pieces.forEach(p => {
+        if (p.team === shooter.team) return;
+        const t = ((p.x - shooter.x) * dx + (p.y - shooter.y) * dy) / len2;
+        if (t <= 0 || t > 1) return;
+        const px = shooter.x + t * dx, py = shooter.y + t * dy;
+        if (Math.hypot(p.x - px, p.y - py) <= SHOT_BLOCK_RADIUS && t < bestT) { best = p; bestT = t; }
+    });
+    return best;
+}
+
+// Fired by the TAKE SHOT button (not by tapping the pitch).
+function takeShot() {
+    if (currentTurn !== myTeam || !selectedPiece || selectedAction !== 'SHOOT' || ball.carrier !== selectedPiece) return;
+    if (isAnimating || isReplaying || matchOver) return;
+    if (!canShootFrom(selectedPiece)) { showLog('Too far to shoot!'); return; }
+    handleShootAction(selectedPiece, targetZone);
+}
+
+// The ball travels the aimed line exactly: it scores unless a defender is standing on that line.
+function handleShootAction(shooter, zone = 'CENTER') {
+    const beforeSnap = snapshotBoard();
+    isAnimating = true;
+    ball.carrier = null;
+
+    const enemyTeam = shooter.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+    const target = getShotTarget(shooter.team, zone);
+    shooter.angle = Math.atan2(target.y - shooter.y, target.x - shooter.x);
+
+    const blocker = findShotBlocker(shooter, target.x, target.y);
+
+    if (blocker) {
+        animateBall(blocker.x, blocker.y, () => {
+            ball.carrier = blocker;
+            logAndToast("SHOT BLOCKED!");
+            isAnimating = false;
+            recordAction('SHOOT', 'Shot blocked!', beforeSnap);
+            switchTurn(enemyTeam);
+        });
+        return;
+    }
+
+    animateBall(target.x, target.y, () => {
+        score[shooter.team]++;
+        updateScoreboard();
+        const scorerLabel = shooter.team === myTeam ? "You" : oppName();
+        recordAction('GOAL', `${scorerLabel} scored!`, beforeSnap);
+        showOverlay("GOAL!", `${scorerLabel} scored!`);
+        isAnimating = false;
+        if (mode === 'ONLINE') pushGameState(shooter.team);
+    });
+}
+
+// =====================================================================
+// VERY HARD CPU
+// ---------------------------------------------------------------------
+// The CPU does not just chase the ball. It evaluates shooting lanes,
+// passing lanes, progression, pressure and defensive positioning.
+// It still uses the normal game actions/rules, so it cannot cheat.
+// =====================================================================
+const CPU_DIFFICULTY = 'VERY_HARD';
+
+function cpuDistance(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function cpuGoal(team) {
+    return getEnemyGoalCenter(team);
+}
+
+function cpuProgress(p) {
+    // Higher = closer to the goal this team is attacking.
+    if (isPortrait) return p.team === TEAM_CPU ? p.y : (canvas.height - p.y);
+    return p.team === TEAM_CPU ? (canvas.width - p.x) : p.x;
+}
+
+function cpuNearestEnemy(p) {
+    let best = null;
+    let bestD = Infinity;
+    pieces.forEach(e => {
+        if (e.team === p.team) return;
+        const d = cpuDistance(p, e);
+        if (d < bestD) { bestD = d; best = e; }
+    });
+    return best;
+}
+
+function cpuLaneBlocked(from, to, enemyTeam) {
+    return pieces.some(enemy => {
+        if (enemy.team !== enemyTeam) return false;
+        return distToSegment(
+            { x: enemy.x, y: enemy.y },
+            { x: from.x, y: from.y },
+            { x: to.x, y: to.y }
+        ) < PieceRadius + 10;
+    });
+}
+
+function cpuBestShot(shooter) {
+    const zones = ['LEFT', 'CENTER', 'RIGHT'];
+    let best = null;
+
+    zones.forEach(zone => {
+        const target = getShotTarget(shooter.team, zone);
+        const blocker = findShotBlocker(shooter, target.x, target.y);
+        const goalDist = cpuDistance(shooter, target);
+        const canShoot = canShootFrom(shooter);
+
+        // In this game a clear shot is a guaranteed goal. The CPU therefore
+        // must treat every legal clear shot as a first-class scoring action,
+        // including a STAR's unrestricted long-range shot.
+        let score = -5000;
+        const friendlyBlocker = cpuFriendlyLaneBlocked(shooter, target.x, target.y);
+        if (canShoot && !blocker && !friendlyBlocker) {
+            score = 5000;
+            // Prefer the shorter/cleaner angle, but never let distance erase
+            // the value of a guaranteed goal.
+            score -= goalDist * 1.25;
+            if (cpuIsStar(shooter)) score += 1800;
+        } else if (canShoot && (blocker || friendlyBlocker)) {
+            // A shot lane occupied by an opponent OR our own teammate is not
+            // treated as a clean scoring chance. The CPU should reposition or
+            // pass rather than shooting through its own shape.
+            score = -900 - goalDist * 0.5 - (friendlyBlocker ? 1800 : 0);
+        }
+
+        if (!best || score > best.score) {
+            best = { zone, target, blocker, friendlyBlocker, goalDist, score, clear: canShoot && !blocker && !friendlyBlocker };
+        }
+    });
+
+    return best;
+}
+
+function cpuBestPass(carrier, teammates) {
+    const enemyTeam = TEAM_USER;
+    let best = null;
+
+    teammates.forEach(receiver => {
+        const distance = cpuDistance(carrier, receiver);
+        if (distance > MoveRadius * 1.35) return;
+
+        const blocked = cpuLaneBlocked(carrier, receiver, enemyTeam);
+        const nearestEnemy = cpuNearestEnemy(receiver);
+        const pressure = nearestEnemy ? cpuDistance(receiver, nearestEnemy) : 300;
+        const advance = cpuProgress(receiver) - cpuProgress(carrier);
+        const goalDistance = cpuDistance(receiver, cpuGoal(TEAM_CPU));
+
+        let score =
+            advance * 3.2 +
+            pressure * 1.15 -
+            goalDistance * 0.35 -
+            distance * 0.15;
+
+        if (blocked) score -= 1800;
+        if (advance < -20 && pressure < 110) score -= 300;
+
+        // A receiver with an immediate scoring chance is dramatically more
+        // valuable than a routine possession pass. This prevents the CPU from
+        // endlessly circulating the ball around midfield.
+        const receiverShot = cpuBestShot(receiver);
+        if (receiverShot && receiverShot.clear && canShootFrom(receiver)) {
+            score += 4200;
+            if (cpuIsStar(receiver)) score += 1600;
+            if (receiverShot.goalDist < 520) score += 900;
+        }
+
+        // If the receiver can attack immediately on the next CPU turn, reward
+        // forward support and punish a lateral/backward recycling pass.
+        if (advance > 35 && pressure > 90) score += 450;
+        if (advance < -35) score -= 500;
+
+        if (!best || score > best.score) {
+            best = { receiver, score, blocked, receiverShot };
+        }
+    });
+
+    return best;
+}
+
+function cpuAttackRecyclePass(carrier, teammates) {
+    // When the direct attacking lane is shut, preserve possession. Prefer a
+    // backward/sideways outlet with space over forcing another forward action.
+    let best = null;
+    teammates.forEach(receiver => {
+        const distance = cpuDistance(carrier, receiver);
+        if (distance > MoveRadius * 1.4) return;
+        const blocked = cpuLaneBlocked(carrier, receiver, TEAM_USER);
+        if (blocked) return;
+
+        const advance = cpuProgress(receiver) - cpuProgress(carrier);
+        const pressure = cpuFuturePressureAt(receiver.x, receiver.y, TEAM_USER);
+        const goalDistance = cpuDistance(receiver, cpuGoal(TEAM_CPU));
+        const shot = cpuBestShot(receiver);
+
+        // Recycling should create a genuine escape, not simply hand the ball
+        // to another teammate who is already trapped.
+        let score =
+            pressure * 2.0 -
+            distance * 0.55 -
+            goalDistance * 0.10;
+
+        if (advance < -18) score += 900;
+        else if (advance < 15) score += 450;
+        else score -= Math.min(700, advance * 4.5);
+
+        if (pressure < 65) score -= 1800;
+        if (shot && shot.clear) score += 1200; // recycle into a player who can attack next.
+        if (cpuIsStar(receiver)) score += 250;
+
+        if (!best || score > best.score) {
+            best = { receiver, score, advance, pressure, shot };
+        }
+    });
+    return best;
+}
+
+function cpuAnticipatedDefensiveAction(userCarrier, cpuPieces) {
+    if (!userCarrier) return null;
+
+    const goal = getEnemyGoalCenter(TEAM_USER);
+    const facing = Number.isFinite(userCarrier.angle) ? userCarrier.angle :
+        Math.atan2(goal.y - userCarrier.y, goal.x - userCarrier.x);
+
+    // Estimate where the attacker will be after another movement. The CPU
+    // defends the next state rather than the current state.
+    const predictionDistances = [55, 85, 115];
+    const candidates = [];
+
+    predictionDistances.forEach(pred => {
+        const px = Math.max(PieceRadius, Math.min(canvas.width - PieceRadius,
+            userCarrier.x + Math.cos(facing) * pred));
+        const py = Math.max(PieceRadius, Math.min(canvas.height - PieceRadius,
+            userCarrier.y + Math.sin(facing) * pred));
+        const predicted = { x: px, y: py };
+
+        cpuPieces.forEach(piece => {
+            if (cpuFriendlyOverlap(piece, px, py)) return;
+
+            const travel = cpuDistance(piece, predicted);
+            const goalCover = cpuDistance(piece, goal);
+            const predictedShotLane = cpuShotLanePosition(predicted, piece, goal);
+            const shotLaneTravel = cpuDistance(piece, predictedShotLane);
+            const legalNow = tackleSide(userCarrier, piece.x, piece.y) === 'FRONT';
+
+            // Block the attacker's predicted path, while also valuing a future
+            // shot screen. This makes defenders step into the play early.
+            let score =
+                2500 - travel * 8.0 - goalCover * 0.16;
+
+            if (legalNow) score += 1200;
+            if (shotLaneTravel < travel) score += 650;
+            if (cpuLaneBlocked(piece, predicted, TEAM_USER)) score -= 900;
+
+            // If the attacker is already entering shooting range, prioritize
+            // the projected shot lane over simply chasing the player.
+            const predictedGoalDistance = cpuDistance(predicted, goal);
+            if (predictedGoalDistance < 520) {
+                score += 900 - shotLaneTravel * 3.2;
+            }
+
+            candidates.push({
+                piece,
+                x: predicted.x,
+                y: predicted.y,
+                score,
+                kind: 'ANTICIPATE_CARRIER',
+                predicted
+            });
+
+            // A second defensive option: step between the attacker and goal.
+            if (shotLaneTravel < 130) {
+                candidates.push({
+                    piece,
+                    x: predictedShotLane.x,
+                    y: predictedShotLane.y,
+                    score: score + 500,
+                    kind: 'ANTICIPATE_SHOT_SCREEN',
+                    predicted
+                });
+            }
+        });
+    });
+
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates.find(c => cpuPositionScore(c.piece, c.x, c.y) > -50000);
+    return best || null;
+}
+
+function cpuDefensiveSupportBlock(userCarrier, cpuPieces) {
+    if (!userCarrier) return null;
+
+    const goal = getEnemyGoalCenter(TEAM_USER);
+    const enemyTeammates = pieces.filter(p => p.team === TEAM_USER && p !== userCarrier);
+    let best = null;
+
+    enemyTeammates.forEach(enemy => {
+        const enemyFacing = Number.isFinite(enemy.angle) ? enemy.angle :
+            Math.atan2(goal.y - enemy.y, goal.x - enemy.x);
+        const predicted = {
+            x: Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, enemy.x + Math.cos(enemyFacing) * 75)),
+            y: Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, enemy.y + Math.sin(enemyFacing) * 75))
+        };
+
+        // Only react strongly when the opposition player is actually moving
+        // toward the CPU goal / carrier threat area.
+        const towardGoal = Math.cos(enemyFacing) * (goal.x - enemy.x) +
+            Math.sin(enemyFacing) * (goal.y - enemy.y);
+        const goalDistance = cpuDistance(enemy, goal);
+        if (towardGoal <= 0 && goalDistance > 520) return;
+
+        cpuPieces.forEach(piece => {
+            if (cpuFriendlyOverlap(piece, predicted.x, predicted.y)) return;
+            const d = cpuDistance(piece, predicted);
+            const lane = distToSegment(
+                { x: piece.x, y: piece.y },
+                { x: enemy.x, y: enemy.y },
+                predicted
+            );
+            let score = 1500 - d * 7.0;
+            if (goalDistance < 480) score += 700;
+            if (enemy.role === 'STAR') score += 900;
+            if (lane < 80) score += 500;
+
+            if (!best || score > best.score) {
+                best = { piece, x: predicted.x, y: predicted.y, score, kind: 'BLOCK_RUNNER' };
+            }
+        });
+    });
+
+    return best;
+}
+
+function cpuDribbleTarget(carrier) {
+    const goal = cpuGoal(TEAM_CPU);
+    const baseAngle = Math.atan2(goal.y - carrier.y, goal.x - carrier.x);
+    const defender = cpuNearestEnemy(carrier);
+    let angle = baseAngle;
+
+    // Move away from the nearest defender instead of blindly running into him.
+    if (defender) {
+        const defenderAngle = Math.atan2(defender.y - carrier.y, defender.x - carrier.x);
+        const awayX = Math.cos(defenderAngle + Math.PI);
+        const awayY = Math.sin(defenderAngle + Math.PI);
+        const gx = Math.cos(baseAngle);
+        const gy = Math.sin(baseAngle);
+        const blend = Math.min(0.65, Math.max(0, (150 - cpuDistance(carrier, defender)) / 150));
+        angle = Math.atan2(
+            gy * (1 - blend) + awayY * blend,
+            gx * (1 - blend) + awayX * blend
+        );
+    }
+
+    const distance = MoveRadius - 18;
+    return {
+        x: Math.max(25, Math.min(canvas.width - 25, carrier.x + Math.cos(angle) * distance)),
+        y: Math.max(25, Math.min(canvas.height - 25, carrier.y + Math.sin(angle) * distance))
+    };
+}
+
+function cpuDefensiveMove(ballCarrier, cpuPieces) {
+    if (!ballCarrier) return null;
+
+    // First priority: take a legal tackle immediately if one exists.
+    const tackleCandidates = cpuPieces
+        .map(p => ({
+            piece: p,
+            distance: cpuDistance(p, ballCarrier),
+            legal: tackleSide(ballCarrier, p.x, p.y) === 'FRONT'
+        }))
+        .filter(x => x.legal)
+        .sort((a, b) => a.distance - b.distance);
+
+    if (tackleCandidates.length) {
+        return {
+            piece: tackleCandidates[0].piece,
+            x: ballCarrier.x,
+            y: ballCarrier.y,
+            kind: 'TACKLE'
+        };
+    }
+
+    // Otherwise, get the best defender into the carrier's forward path.
+    const facing = ballCarrier.angle || 0;
+    const interceptPoint = {
+        x: Math.max(25, Math.min(canvas.width - 25, ballCarrier.x + Math.cos(facing) * 75)),
+        y: Math.max(25, Math.min(canvas.height - 25, ballCarrier.y + Math.sin(facing) * 75))
+    };
+
+    let best = null;
+    cpuPieces.forEach(p => {
+        const d = cpuDistance(p, interceptPoint);
+        const cover = cpuDistance(p, cpuGoal(TEAM_CPU));
+        const score = d + cover * 0.18;
+        if (!best || score < best.score) best = { piece: p, score };
+    });
+
+    return best
+        ? { piece: best.piece, x: interceptPoint.x, y: interceptPoint.y, kind: 'CONTAIN' }
+        : null;
+}
+
+function cpuFuturePressureAt(x, y, team = TEAM_USER) {
+    let best = Infinity;
+    pieces.forEach(p => {
+        if (p.team !== team) return;
+        best = Math.min(best, Math.hypot(p.x - x, p.y - y));
+    });
+    return best === Infinity ? 999 : best;
+}
+
+function cpuFutureThreat(piece, targetX, targetY) {
+    // Estimate how dangerous the opponent's next turn becomes after this move.
+    const pressure = cpuFuturePressureAt(targetX, targetY, TEAM_USER);
+    const nearest = cpuNearestEnemy(piece);
+    const approach = nearest ? Math.hypot(nearest.x - targetX, nearest.y - targetY) : 999;
+    return Math.max(0, 150 - Math.min(pressure, approach));
+}
+
+function cpuGoalThreat(x, y) {
+    const goal = cpuGoal(TEAM_CPU);
+    return Math.hypot(goal.x - x, goal.y - y);
+}
+
+function cpuEvaluateFuturePosition(x, y, angle = 0) {
+    const progress = isPortrait ? y : (canvas.width - x);
+    const goalDistance = cpuGoalThreat(x, y);
+    const pressure = cpuFuturePressureAt(x, y, TEAM_USER);
+
+    // Predict the user's strongest immediate response: pressure the ball carrier.
+    let response = 0;
+    pieces.forEach(enemy => {
+        if (enemy.team !== TEAM_USER) return;
+        const d = Math.hypot(enemy.x - x, enemy.y - y);
+        if (d < 190) response = Math.max(response, 190 - d);
+
+        // Extra penalty when the defender is in front of the projected carrier.
+        const front = Math.cos(angle) * (enemy.x - x) + Math.sin(angle) * (enemy.y - y);
+        if (front > 0 && d < 230) response += 45;
+    });
+
+    return progress * 2.2 - goalDistance * 1.25 + pressure * 0.8 - response * 1.4;
+}
+
+function cpuPredictUserTackleTarget(x, y) {
+    let best = null;
+    pieces.forEach(enemy => {
+        if (enemy.team !== TEAM_USER) return;
+        const d = Math.hypot(enemy.x - x, enemy.y - y);
+        const score = d + (tackleSide({ x, y, angle: enemy.angle || 0 }, enemy.x, enemy.y) === 'FRONT' ? -35 : 0);
+        if (!best || score < best.score) best = { enemy, score };
+    });
+    return best;
+}
+
+function cpuRetreatTarget(carrier, enemyTeam = TEAM_USER) {
+    // When the forward lane is blocked, retreat instead of repeatedly walking
+    // into the same defender. Prefer open space toward our own half.
+    const enemies = pieces.filter(p => p.team === enemyTeam);
+    const ownGoal = cpuGoal(TEAM_USER); // CPU's own goal
+    const goalAngle = Math.atan2(ownGoal.y - carrier.y, ownGoal.x - carrier.x);
+
+    let awayX = 0, awayY = 0;
+    enemies.forEach(e => {
+        const dx = carrier.x - e.x, dy = carrier.y - e.y;
+        const d = Math.max(1, Math.hypot(dx, dy));
+        if (d < 230) {
+            const w = (230 - d) / 230;
+            awayX += (dx / d) * w;
+            awayY += (dy / d) * w;
+        }
+    });
+
+    let angle = goalAngle;
+    if (Math.hypot(awayX, awayY) > 0.05) {
+        const escapeAngle = Math.atan2(awayY, awayX);
+        // Blend retreat-to-own-half with space away from pressure.
+        angle = Math.atan2(
+            Math.sin(goalAngle) * 0.65 + Math.sin(escapeAngle) * 0.35,
+            Math.cos(goalAngle) * 0.65 + Math.cos(escapeAngle) * 0.35
+        );
+    }
+
+    const distances = [MoveRadius * 0.45, MoveRadius * 0.7, MoveRadius];
+    let best = null;
+    distances.forEach(dist => {
+        [-0.45, -0.2, 0, 0.2, 0.45].forEach(offset => {
+            const a = angle + offset;
+            const x = Math.max(25, Math.min(canvas.width - 25, carrier.x + Math.cos(a) * dist));
+            const y = Math.max(25, Math.min(canvas.height - 25, carrier.y + Math.sin(a) * dist));
+            const blocked = cpuLaneBlocked(carrier, { x, y }, enemyTeam);
+            const pressure = cpuFuturePressureAt(x, y, enemyTeam);
+            const score = (blocked ? -900 : 0) + pressure * 2 + cpuEvaluateFuturePosition(x, y, a);
+            if (!best || score > best.score) best = { x, y, angle: a, score };
+        });
+    });
+    return best || { x: carrier.x, y: carrier.y };
+}
+
+function cpuForwardLaneBlocked(carrier, enemyTeam = TEAM_USER) {
+    const goal = cpuGoal(TEAM_CPU);
+    const dx = goal.x - carrier.x, dy = goal.y - carrier.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1) return false;
+    const ux = dx / d, uy = dy / d;
+    return pieces.some(enemy => {
+        if (enemy.team !== enemyTeam) return false;
+        const ex = enemy.x - carrier.x, ey = enemy.y - carrier.y;
+        const along = ex * ux + ey * uy;
+        const perp = Math.abs(ex * uy - ey * ux);
+        return along > 15 && along < MoveRadius + 45 && perp < PieceRadius * 2 + 14;
+    });
+}
+
+// ---------------------------------------------------------------------
+// TEAM SHAPE / SPACING RULES
+// CPU players must never intentionally occupy their own teammate's space
+// or a teammate's attacking/shooting lane. These are hard constraints for
+// AI positioning, not merely small scoring preferences.
+// ---------------------------------------------------------------------
+const CPU_MIN_TEAM_GAP = PieceRadius * 2 + 8;
+const CPU_SOFT_TEAM_GAP = PieceRadius * 3 + 10;
+const CPU_LANE_CLEARANCE = PieceRadius + 8;
+
+function cpuFriendlyOverlap(piece, x, y, extraGap = CPU_MIN_TEAM_GAP) {
+    return pieces.some(other => {
+        if (other === piece || other.team !== piece.team) return false;
+        return Math.hypot(other.x - x, other.y - y) < extraGap;
+    });
+}
+
+function cpuFriendlyLaneBlocked(shooter, tx, ty, ignorePiece = null) {
+    return pieces.some(p => {
+        if (p.team !== shooter.team || p === shooter || p === ignorePiece) return false;
+        const t = ((p.x - shooter.x) * (tx - shooter.x) + (p.y - shooter.y) * (ty - shooter.y));
+        const len2 = (tx - shooter.x) ** 2 + (ty - shooter.y) ** 2;
+        if (len2 <= 0) return false;
+        const u = t / len2;
+        if (u <= 0.08 || u >= 0.98) return false;
+        const px = shooter.x + (tx - shooter.x) * u;
+        const py = shooter.y + (ty - shooter.y) * u;
+        return Math.hypot(p.x - px, p.y - py) < CPU_LANE_CLEARANCE;
+    });
+}
+
+function cpuPositionScore(piece, x, y, options = {}) {
+    const { avoidPiece = null, avoidLaneFrom = null, avoidLaneTo = null } = options;
+    let score = 0;
+
+    // Hard penalty: teammates must not stack. A destination inside this gap
+    // is considered unusable unless it is the carrier's actual tackle target.
+    const nearestTeammate = pieces
+        .filter(p => p.team === piece.team && p !== piece && p !== avoidPiece)
+        .reduce((best, p) => Math.min(best, Math.hypot(p.x - x, p.y - y)), Infinity);
+
+    if (nearestTeammate < CPU_MIN_TEAM_GAP) return -100000;
+    if (nearestTeammate < CPU_SOFT_TEAM_GAP) score -= (CPU_SOFT_TEAM_GAP - nearestTeammate) * 22;
+
+    if (avoidLaneFrom && avoidLaneTo &&
+        distToSegment({ x, y }, avoidLaneFrom, avoidLaneTo) < CPU_LANE_CLEARANCE) {
+        score -= 2500;
+    }
+    return score;
+}
+
+function cpuShotLanePosition(shooter, defender, goal) {
+    // Put the defender on the ray between the shooter and our goal. This is
+    // especially important against a STAR who can shoot from any distance.
+    const dx = goal.x - shooter.x;
+    const dy = goal.y - shooter.y;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    const desired = Math.min(150, Math.max(55, d * 0.42));
+    const x = shooter.x + (dx / d) * desired;
+    const y = shooter.y + (dy / d) * desired;
+    return {
+        x: Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, x)),
+        y: Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, y))
+    };
+}
+
+function cpuSupportPosition(carrier, teammate, enemyTeam = TEAM_USER) {
+    const goal = cpuGoal(TEAM_CPU);
+    const goalAngle = Math.atan2(goal.y - carrier.y, goal.x - carrier.x);
+    const enemy = cpuNearestEnemy(carrier);
+    const enemyAngle = enemy
+        ? Math.atan2(enemy.y - carrier.y, enemy.x - carrier.x)
+        : goalAngle + Math.PI;
+    const enemyDist = enemy ? cpuDistance(carrier, enemy) : 999;
+    const pressureSide = Math.sign(Math.sin(enemyAngle - goalAngle)) || 1;
+    const oppositeSide = -pressureSide;
+    const options = [];
+
+    [
+        { off: oppositeSide * 1.05, weight: 1.55, label: 'OPPOSITE_FLANK' },
+        { off: oppositeSide * 0.70, weight: 1.40, label: 'OPPOSITE_DIAGONAL' },
+        { off: -oppositeSide * 0.70, weight: 1.20, label: 'OTHER_DIAGONAL' },
+        { off: 0.55, weight: 1.00, label: 'FORWARD_SIDE' },
+        { off: -0.55, weight: 1.00, label: 'FORWARD_SIDE' },
+        { off: Math.PI * 0.70, weight: 0.82, label: 'RECYCLE_SIDE' },
+        { off: Math.PI, weight: 0.68, label: 'RECYCLE' }
+    ].forEach(o => {
+        const a = goalAngle + o.off;
+        [85, 115, 135].forEach(dist => {
+            const x = Math.max(28, Math.min(canvas.width - 28, carrier.x + Math.cos(a) * dist));
+            const y = Math.max(28, Math.min(canvas.height - 28, carrier.y + Math.sin(a) * dist));
+            const pressure = cpuFuturePressureAt(x, y, enemyTeam);
+            const goalDist = Math.hypot(goal.x - x, goal.y - y);
+            const progress = cpuProgress({ team: TEAM_CPU, x, y }) - cpuProgress(carrier);
+            const laneBlocked = cpuLaneBlocked(carrier, { x, y }, enemyTeam);
+            const travel = Math.hypot(teammate.x - x, teammate.y - y);
+            const spacing = cpuPositionScore(teammate, x, y);
+
+            // Never call a teammate into the carrier's body or another teammate.
+            // Also keep the support route itself out of the carrier's shooting lane.
+            const carrierGap = Math.hypot(carrier.x - x, carrier.y - y);
+            const carrierShotLane = cpuFriendlyLaneBlocked(
+                carrier,
+                goal.x,
+                goal.y,
+                teammate
+            );
+            const side = Math.sign(Math.sin(Math.atan2(y - carrier.y, x - carrier.x) - goalAngle)) || 1;
+            const oppositeBonus = side === oppositeSide ? 260 : 0;
+            const pressureEscape = Math.max(0, 150 - enemyDist) * (side === oppositeSide ? 2.2 : 0.8);
+
+            let score =
+                pressure * 2.6 +
+                progress * 2.1 -
+                goalDist * 0.65 -
+                travel * 0.9 +
+                oppositeBonus +
+                pressureEscape +
+                o.weight * 120 +
+                spacing;
+
+            if (carrierGap < CPU_MIN_TEAM_GAP) score = -100000;
+            if (laneBlocked) score -= 850;
+            if (pressure < 65) score -= 500;
+            if (dist < 100 && enemy && cpuDistance(enemy, {x, y}) < 90) score -= 700;
+            if (carrierShotLane && distToSegment({x, y}, carrier, goal) < CPU_LANE_CLEARANCE) score -= 3000;
+
+            options.push({ x, y, score, laneBlocked, label: o.label, travel });
+        });
+    });
+
+    options.sort((a, b) => b.score - a.score);
+    const best = options.find(o => o.score > -50000);
+    if (!best) return null;
+    return { ...best };
+}
+
+function cpuIsStar(piece) {
+    return !!piece && piece.role === 'STAR';
+}
+
+function cpuDangerLevel(carrier) {
+    if (!carrier) return 0;
+    const goal = getEnemyGoalCenter(TEAM_USER);
+    const goalDist = Math.hypot(goal.x - carrier.x, goal.y - carrier.y);
+    const star = cpuIsStar(carrier);
+    const nearbyCpu = pieces.filter(p => p.team === TEAM_CPU && p !== carrier && cpuDistance(p, carrier) < 190).length;
+    const nearbyUser = pieces.filter(p => p.team === TEAM_USER && p !== carrier && cpuDistance(p, carrier) < 190).length;
+
+    let danger = star ? 1600 : 0;
+    if (canShootFrom(carrier)) danger += 650;
+    if (star) danger += Math.max(0, 500 - goalDist) * 1.2;
+    if (nearbyCpu === 0) danger += 350;
+    if (nearbyUser > nearbyCpu) danger += (nearbyUser - nearbyCpu) * 180;
+
+    // If any immediate shot is clear, the CPU must treat the situation as urgent.
+    ['LEFT', 'CENTER', 'RIGHT'].forEach(zone => {
+        const t = getShotTarget(TEAM_USER, zone);
+        if (!findShotBlocker(carrier, t.x, t.y)) danger += 500;
+    });
+    return danger;
+}
+
+function cpuStarDefensiveMove(star, cpuPieces) {
+    if (!star) return null;
+
+    // A Star can score from anywhere, so proximity to the Star is the first
+    // defensive concern. Prefer a legal tackle, otherwise close the shooting
+    // lane / deny the Star a free turn.
+    const candidates = cpuPieces.map(piece => {
+        const d = cpuDistance(piece, star);
+        const legal = tackleSide(star, piece.x, piece.y) === 'FRONT';
+        const goal = getEnemyGoalCenter(TEAM_USER);
+        const goalLineD = Math.abs((star.x - goal.x) * (goal.y - star.y) - (star.y - goal.y) * (goal.x - star.x)) /
+            Math.max(1, Math.hypot(goal.x - star.x, goal.y - star.y));
+
+        let score = 0;
+        if (legal) score += 2600;
+        score -= d * (legal ? 5.5 : 2.7);
+        score -= goalLineD * 0.35;
+        score -= cpuDistance(piece, cpuGoal(TEAM_CPU)) * 0.12;
+        return { piece, d, legal, score };
+    }).sort((a,b) => b.score - a.score);
+
+    const best = candidates[0];
+    if (!best) return null;
+
+    if (best.legal) {
+        return { piece: best.piece, x: star.x, y: star.y, kind: 'STAR_TACKLE', score: best.score };
+    }
+
+    // Don't merely chase the Star. Put the nearest defender close enough that
+    // the Star's next shot/pass decision is pressured.
+    const dx = star.x - best.piece.x;
+    const dy = star.y - best.piece.y;
+    const d = Math.max(1, Math.hypot(dx, dy));
+    const closeDist = Math.min(75, Math.max(38, d - 25));
+    const x = star.x - (dx / d) * closeDist;
+    const y = star.y - (dy / d) * closeDist;
+    return {
+        piece: best.piece,
+        x: Math.max(25, Math.min(canvas.width - 25, x)),
+        y: Math.max(25, Math.min(canvas.height - 25, y)),
+        kind: 'STAR_MARK',
+        score: best.score
+    };
+}
+
+function cpuChooseSupportAction(carrier, cpuPieces) {
+    const teammates = cpuPieces.filter(p => p !== carrier);
+    if (!teammates.length) return null;
+
+    const nearestEnemy = cpuNearestEnemy(carrier);
+    const pressure = nearestEnemy ? cpuDistance(carrier, nearestEnemy) : 999;
+    const forwardBlocked = cpuForwardLaneBlocked(carrier, TEAM_USER);
+    const passOptions = teammates.map(t => cpuBestPass(carrier, [t])).filter(Boolean);
+
+    // A carrier does not need to wait until the defender is already on top of
+    // him. A blocked forward lane is enough to activate the supporting shape.
+    const blockedTrigger = forwardBlocked || pressure < 135;
+    if (!blockedTrigger) return null;
+
+    let best = null;
+    teammates.forEach(teammate => {
+        const support = cpuSupportPosition(carrier, teammate, TEAM_USER);
+        if (!support) return;
+
+        const currentDist = cpuDistance(carrier, teammate);
+        const travel = cpuDistance(teammate, support);
+        const receiverPressure = cpuFuturePressureAt(support.x, support.y, TEAM_USER);
+        const progress = cpuProgress({ team: TEAM_CPU, x: support.x, y: support.y }) - cpuProgress(carrier);
+        const immediatePass = cpuBestPass(carrier, [teammate]);
+        const receiverShot = cpuBestShot(teammate);
+
+        let score = support.score;
+        score += forwardBlocked ? 1100 : 0;
+        score += pressure < 105 ? 750 : 0;
+        score += receiverPressure * 2.0;
+        score += progress * 1.8;
+        score -= travel * 1.05;
+
+        // Strongly prefer a teammate who can become a dangerous receiver once
+        // he reaches the new space, especially a STAR.
+        if (receiverShot && receiverShot.clear) score += 900;
+        if (cpuIsStar(teammate)) score += 700;
+
+        // If the existing pass is safe but does not advance or create a shot,
+        // movement is preferred: this prevents static pass-pass-pass cycles.
+        if (immediatePass && !immediatePass.blocked && immediatePass.score > 3000) score -= 350;
+        if (travel < 14) score -= 900;
+        if (support.laneBlocked) score -= 1200;
+
+        // The support player should actually change the geometry. If he is
+        // already sitting on the carrier's side of the pitch, prefer another.
+        const goalAngle = Math.atan2(cpuGoal(TEAM_CPU).y - carrier.y, cpuGoal(TEAM_CPU).x - carrier.x);
+        const supportSide = Math.sign(Math.sin(Math.atan2(support.y - carrier.y, support.x - carrier.x) - goalAngle));
+        if (nearestEnemy) {
+            const pressureSide = Math.sign(Math.sin(Math.atan2(nearestEnemy.y - carrier.y, nearestEnemy.x - carrier.x) - goalAngle));
+            if (supportSide && pressureSide && supportSide !== pressureSide) score += 650;
+        }
+
+        if (!best || score > best.score) {
+            best = { piece: teammate, x: support.x, y: support.y, score, travel, label: support.label };
+        }
+    });
+
+    if (!best || best.travel < 14 || best.score < 500) return null;
+    return best;
+}
+function cpuBestDefensiveShape(userCarrier, cpuPieces) {
+    const userStar = pieces.find(p => p.team === TEAM_USER && p.role === 'STAR');
+    const threat = userStar && (ball.carrier === userStar || canShootFrom(userStar)) ? userStar : userCarrier;
+    const goal = getEnemyGoalCenter(TEAM_USER);
+    const danger = cpuDangerLevel(threat);
+
+    let best = null;
+    cpuPieces.forEach(piece => {
+        const legalTackle = ball.carrier === userCarrier && tackleSide(userCarrier, piece.x, piece.y) === 'FRONT';
+        const distance = cpuDistance(piece, threat);
+        const laneTarget = cpuShotLanePosition(threat, piece, goal);
+        const laneDistance = cpuDistance(piece, laneTarget);
+        const laneBlocker = cpuFriendlyOverlap(piece, laneTarget.x, laneTarget.y);
+        const laneScore = 2100 - laneDistance * 6.2 - cpuDistance(piece, goal) * 0.12;
+        const tackleScore = legalTackle ? 3000 - distance * 8 : 0;
+
+        let score = Math.max(tackleScore, laneScore);
+        let x = legalTackle ? userCarrier.x : laneTarget.x;
+        let y = legalTackle ? userCarrier.y : laneTarget.y;
+        let kind = legalTackle ? 'TACKLE' : 'SHOT_LANE_BLOCK';
+
+        // When the star can shoot, deliberately build a screen in front of the
+        // goal instead of sending every defender directly at the star.
+        if (userStar && ball.carrier === userStar) {
+            const lane = cpuShotLanePosition(userStar, piece, goal);
+            const laneSafe = cpuPositionScore(piece, lane.x, lane.y) > -50000;
+            if (laneSafe) {
+                const clearLane = !findShotBlocker(userStar, goal.x, goal.y);
+                score = Math.max(score, 3600 - cpuDistance(piece, lane) * 7 + (clearLane ? 1100 : 0));
+                x = lane.x;
+                y = lane.y;
+                kind = 'STAR_SHOT_SCREEN';
+            }
+        }
+
+        const spacingScore = cpuPositionScore(piece, x, y);
+        if (spacingScore <= -50000) return;
+        score += spacingScore;
+
+        // Keep defensive support distributed: at least one CPU player should
+        // remain between the threat and goal rather than all five collapsing.
+        const goalCoverers = cpuPieces.filter(p => p !== piece && cpuDistance(p, goal) < 230).length;
+        if (danger > 700 && goalCoverers === 0) score -= 900;
+
+        // Avoid sending the defender through a teammate's existing position.
+        if (cpuFriendlyOverlap(piece, x, y)) score -= 5000;
+
+        if (!best || score > best.score) {
+            best = { piece, x, y, kind, score, danger };
+        }
+    });
+
+    return best;
+}
+
+function cpuBallRouteBlocked(piece, targetX, targetY, enemyTeam = TEAM_USER) {
+    return pieces.some(enemy => {
+        if (enemy.team !== enemyTeam) return false;
+        const laneDistance = distToSegment(
+            { x: enemy.x, y: enemy.y },
+            { x: piece.x, y: piece.y },
+            { x: targetX, y: targetY }
+        );
+        return laneDistance < PieceRadius * 1.45 + 8;
+    });
+}
+
+function cpuBallApproachOptions(piece, enemyTeam = TEAM_USER) {
+    // The pickup radius is roughly 38px. Approach points stay inside that
+    // radius so a clean route can recover the ball in one move. If the direct
+    // route is blocked, search around the ball for a different entry angle.
+    const options = [];
+    const radii = [28, 34, 37];
+    const base = Math.atan2(ball.y - piece.y, ball.x - piece.x);
+
+    radii.forEach(radius => {
+        for (let i = 0; i < 12; i++) {
+            const a = (Math.PI * 2 * i) / 12;
+            const x = Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, ball.x + Math.cos(a) * radius));
+            const y = Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, ball.y + Math.sin(a) * radius));
+            const blocked = cpuBallRouteBlocked(piece, x, y, enemyTeam);
+            const enemyPressure = cpuFuturePressureAt(x, y, enemyTeam);
+            const travel = Math.hypot(piece.x - x, piece.y - y);
+            const approachDelta = Math.abs(Math.atan2(Math.sin(a - base), Math.cos(a - base)));
+
+            // Prefer a route that reaches the ball quickly, is not blocked,
+            // and enters from space away from the opponent.
+            let score =
+                enemyPressure * 2.1 -
+                travel * 1.35 -
+                approachDelta * 35;
+
+            if (blocked) score -= 2200;
+            if (enemyPressure < 55) score -= 700;
+
+            options.push({ x, y, score, blocked, travel, angle: a });
+        }
+    });
+
+    return options.sort((a, b) => b.score - a.score);
+}
+
+function cpuLooseBallChoice(cpuPieces) {
+    let best = null;
+    const directCandidates = [];
+    const routeCandidates = [];
+
+    cpuPieces.forEach(piece => {
+        const d = cpuDistance(piece, ball);
+        const enemy = cpuNearestEnemy(piece);
+        const enemyD = enemy ? cpuDistance(piece, enemy) : 300;
+        const progress = cpuProgress(piece);
+        const directBlocked = cpuBallRouteBlocked(piece, ball.x, ball.y, TEAM_USER);
+
+        // Direct collection is always preferred when the route is actually
+        // open. This is the normal case.
+        if (!directBlocked) {
+            const score =
+                progress * 0.7 -
+                d * 1.9 +
+                enemyD * 0.65 +
+                1500;
+            directCandidates.push({ piece, x: ball.x, y: ball.y, score, route: 'DIRECT' });
+            return;
+        }
+
+        // IMPORTANT: a blocked ball route is NOT treated as permission to keep
+        // sending the same player through the defender. Find another CPU player
+        // and another entry angle around the ball.
+        const alternatives = cpuBallApproachOptions(piece, TEAM_USER);
+        const route = alternatives.find(option => !option.blocked);
+        if (!route) return;
+
+        const score =
+            progress * 0.55 -
+            route.travel * 1.45 +
+            cpuFuturePressureAt(route.x, route.y, TEAM_USER) * 1.25 +
+            enemyD * 0.35;
+
+        routeCandidates.push({
+            piece,
+            x: route.x,
+            y: route.y,
+            score,
+            route: 'ALTERNATE',
+            approachAngle: route.angle
+        });
+    });
+
+    if (directCandidates.length) {
+        directCandidates.sort((a, b) => b.score - a.score);
+        best = directCandidates[0];
+    } else if (routeCandidates.length) {
+        routeCandidates.sort((a, b) => b.score - a.score);
+        best = routeCandidates[0];
+    }
+
+    return best;
+}
+
+function cpuSafeMoveTarget(piece, targetX, targetY) {
+    const dx = targetX - piece.x;
+    const dy = targetY - piece.y;
+    const baseAngle = Math.atan2(dy, dx);
+    const baseDist = Math.min(MoveRadius, Math.max(0, Math.hypot(dx, dy)));
+
+    // The requested destination is preferred, but if a teammate occupies it,
+    // move into the nearest open pocket rather than creating a CPU-on-CPU wall.
+    const candidates = [{ x: targetX, y: targetY, bonus: 500 }];
+    [0.25, 0.45, 0.65, 0.9, 1.15].forEach(offset => {
+        [baseAngle + offset, baseAngle - offset].forEach(a => {
+            [Math.max(45, baseDist), Math.max(55, baseDist - 25), Math.min(MoveRadius, baseDist + 25)].forEach(d => {
+                candidates.push({
+                    x: Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, piece.x + Math.cos(a) * d)),
+                    y: Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, piece.y + Math.sin(a) * d)),
+                    bonus: 0
+                });
+            });
+        });
+    });
+
+    let best = null;
+    candidates.forEach(c => {
+        const spacing = cpuPositionScore(piece, c.x, c.y);
+        if (spacing <= -50000) return;
+        const travel = Math.hypot(c.x - targetX, c.y - targetY);
+        const score = spacing + c.bonus - travel * 8;
+        if (!best || score > best.score) best = { x: c.x, y: c.y, score };
+    });
+    return best ? { x: best.x, y: best.y } : { x: targetX, y: targetY };
+}
+
+function playCpuTurn() {
+    if (matchOver || mode !== 'CPU' || inLobby || phase !== 'PLAY' || isAnimating || isReplaying) return;
+
+    const cpuPieces = pieces.filter(p => p.team === TEAM_CPU);
+    const cpuCarrier = ball.carrier && ball.carrier.team === TEAM_CPU ? ball.carrier : null;
+    const userCarrier = ball.carrier && ball.carrier.team === TEAM_USER ? ball.carrier : null;
+
+    // ==================== DEFENCE ====================
+    if (userCarrier) {
+        // Defend the next position first. If the attacker is approaching,
+        // intercept or screen the route before the attacker reaches it.
+        const anticipated = cpuAnticipatedDefensiveAction(userCarrier, cpuPieces);
+        if (anticipated && anticipated.score > 1500) {
+            const t = cpuSafeMoveTarget(anticipated.piece, anticipated.x, anticipated.y);
+            handleMoveAction(anticipated.piece, t.x, t.y);
+            return;
+        }
+
+        // Also block dangerous off-ball runners so the carrier does not get an
+        // easy support pass after the first defender commits.
+        const runnerBlock = cpuDefensiveSupportBlock(userCarrier, cpuPieces);
+        if (runnerBlock && runnerBlock.score > 1750) {
+            const t = cpuSafeMoveTarget(runnerBlock.piece, runnerBlock.x, runnerBlock.y);
+            handleMoveAction(runnerBlock.piece, t.x, t.y);
+            return;
+        }
+
+        const defensive = cpuBestDefensiveShape(userCarrier, cpuPieces);
+        if (defensive) {
+            const t = cpuSafeMoveTarget(defensive.piece, defensive.x, defensive.y);
+            handleMoveAction(defensive.piece, t.x, t.y);
+            return;
+        }
+    }
+
+    // ==================== ATTACK ====================
+    if (cpuCarrier) {
+        const danger = cpuDangerLevel(cpuCarrier);
+        const nearestEnemy = cpuNearestEnemy(cpuCarrier);
+        const pressure = nearestEnemy ? cpuDistance(cpuCarrier, nearestEnemy) : 999;
+        const forwardBlocked = cpuForwardLaneBlocked(cpuCarrier, TEAM_USER);
+        const teammates = cpuPieces.filter(p => p !== cpuCarrier);
+
+        // 1. SHOOT whenever the CPU has a genuine open scoring lane.
+        // Shooting is evaluated before support because possession may disappear
+        // if the defender closes the lane on the next turn.
+        const shot = cpuBestShot(cpuCarrier);
+        if (shot && shot.clear && canShootFrom(cpuCarrier)) {
+            handleShootAction(cpuCarrier, shot.zone);
+            return;
+        }
+
+        // 2. The forward route is blocked: decide whether another attacking
+        // player can receive the ball and shoot/advance immediately.
+        const pass = cpuBestPass(cpuCarrier, teammates);
+        if (pass && !pass.blocked) {
+            const receiverCanShoot = pass.receiverShot && pass.receiverShot.clear && canShootFrom(pass.receiver);
+            const attackingPass = receiverCanShoot ||
+                cpuProgress(pass.receiver) - cpuProgress(cpuCarrier) > 30;
+
+            if (attackingPass) {
+                handlePassAction(cpuCarrier, pass.receiver);
+                return;
+            }
+        }
+
+        // 3. If blocked and there is no safe attacking outlet, RETURN THE BALL.
+        // This is deliberate possession management: go backward/sideways rather
+        // than forcing a dribble into a defender or repeatedly moving support.
+        if (forwardBlocked || pressure < 82) {
+            const recycle = cpuAttackRecyclePass(cpuCarrier, teammates);
+            if (recycle && recycle.pressure > 62) {
+                handlePassAction(cpuCarrier, recycle.receiver);
+                return;
+            }
+        }
+
+        // 4. If no safe recycle exists, call support to manufacture a new lane.
+        // The support player must move without occupying the carrier's own lane.
+        if (forwardBlocked || pressure < 115) {
+            const support = cpuChooseSupportAction(cpuCarrier, cpuPieces);
+            if (support) {
+                const t = cpuSafeMoveTarget(support.piece, support.x, support.y);
+                handleMoveAction(support.piece, t.x, t.y);
+                return;
+            }
+        }
+
+        // 5. Recheck the shot after the attacking shape has opened.
+        const recheckShot = cpuBestShot(cpuCarrier);
+        if (recheckShot && recheckShot.clear && canShootFrom(cpuCarrier)) {
+            handleShootAction(cpuCarrier, recheckShot.zone);
+            return;
+        }
+
+        // 6. Escape pressure instead of repeatedly attacking the same block.
+        if (forwardBlocked || pressure < 65) {
+            const retreat = cpuRetreatTarget(cpuCarrier, TEAM_USER);
+            const t = cpuSafeMoveTarget(cpuCarrier, retreat.x, retreat.y);
+            handleMoveAction(cpuCarrier, t.x, t.y);
+            return;
+        }
+
+        // 7. Controlled attacking dribble. Prefer changing the angle of attack
+        // instead of moving directly into a defender.
+        const dribble = cpuDribbleTarget(cpuCarrier);
+        { const t = cpuSafeMoveTarget(cpuCarrier, dribble.x, dribble.y); handleMoveAction(cpuCarrier, t.x, t.y); }
+        return;
+    }
+
+    // ==================== LOOSE BALL ====================
+    // If the nearest route to the ball is blocked, cpuLooseBallChoice()
+    // deliberately selects a different CPU player and a different entry angle
+    // instead of repeatedly running the same player into the same defender.
+    const choice = cpuLooseBallChoice(cpuPieces);
+    if (choice) { const t = cpuSafeMoveTarget(choice.piece, choice.x, choice.y); handleMoveAction(choice.piece, t.x, t.y); }
+}
+
+function animateMovement(piece, targetX, targetY, callback) {
+    isAnimating = true;
+    const startX = piece.x;
+    const startY = piece.y;
+    const duration = 380;
+    const startTime = performance.now();
+
+    function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3);
+
+        piece.x = startX + (targetX - startX) * ease;
+        piece.y = startY + (targetY - startY) * ease;
+        if (ball.carrier === piece) { ball.x = piece.x; ball.y = piece.y; }
+
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            piece.x = targetX;
+            piece.y = targetY;
+            if (ball.carrier === piece) { ball.x = piece.x; ball.y = piece.y; }
+            isAnimating = false;
+            callback();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function animateBall(targetX, targetY, callback) {
+    const startX = ball.x;
+    const startY = ball.y;
+    const duration = 350;
+    const startTime = performance.now();
+
+    function step(now) {
+        const progress = Math.min((now - startTime) / duration, 1);
+        ball.x = startX + (targetX - startX) * progress;
+        ball.y = startY + (targetY - startY) * progress;
+        if (progress < 1) {
+            requestAnimationFrame(step);
+        } else {
+            ball.x = targetX;
+            ball.y = targetY;
+            callback();
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function distToSegment(p, v, w) {
+    const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+    if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+}
+
+function drawPitch() {
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 3;
+
+    if (isPortrait) {
+        const GY = canvas.width / 2 - GoalHeight / 2;
+        ctx.beginPath(); ctx.moveTo(0, canvas.height / 2); ctx.lineTo(canvas.width, canvas.height / 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(canvas.width / 2, canvas.height / 2, 75, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeRect(GY - 30, 0, GoalHeight + 60, 150);
+        ctx.strokeRect(GY - 30, canvas.height - 150, GoalHeight + 60, 150);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(GY, 0, GoalHeight, GoalWidth);
+        ctx.fillRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
+        ctx.strokeStyle = '#fbc02d';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(GY, 0, GoalHeight, GoalWidth);
+        ctx.strokeRect(GY, canvas.height - GoalWidth, GoalHeight, GoalWidth);
+    } else {
+        const GY = canvas.height / 2 - GoalHeight / 2;
+        ctx.beginPath(); ctx.moveTo(canvas.width / 2, 0); ctx.lineTo(canvas.width / 2, canvas.height); ctx.stroke();
+        ctx.beginPath(); ctx.arc(canvas.width / 2, canvas.height / 2, 75, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeRect(0, GY - 30, 150, GoalHeight + 60);
+        ctx.strokeRect(canvas.width - 150, GY - 30, 150, GoalHeight + 60);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(0, GY, GoalWidth, GoalHeight);
+        ctx.fillRect(canvas.width - GoalWidth, GY, GoalWidth, GoalHeight);
+        ctx.strokeStyle = '#fbc02d';
+        ctx.lineWidth = 6;
+        ctx.strokeRect(0, GY, GoalWidth, GoalHeight);
+        ctx.strokeRect(canvas.width - GoalWidth, GY, GoalWidth, GoalHeight);
+    }
+}
+
+function drawMovementRadius() {
+    if (currentTurn === myTeam && selectedPiece && selectedAction === 'MOVE' && !isAnimating) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(selectedPiece.x, selectedPiece.y, MoveRadius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 255, 255, 0.08)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.stroke();
+
+        if (pointerPos) {
+            const moveRes = resolveMovementWithCollisions(selectedPiece, pointerPos.x, pointerPos.y);
+            ctx.beginPath();
+            ctx.moveTo(selectedPiece.x, selectedPiece.y);
+            ctx.lineTo(moveRes.finalX, moveRes.finalY);
+            ctx.strokeStyle = '#00ffff';
+            ctx.setLineDash([4, 4]);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(moveRes.finalX, moveRes.finalY, PieceRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.6)';
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+// Faint wedge in front of the opposing ball carrier = the only zone you can tackle from.
+function drawTackleZone() {
+    if (currentTurn !== myTeam || isAnimating || isReplaying || matchOver) return;
+    const c = ball.carrier;
+    if (!c || c.team === myTeam) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.arc(c.x, c.y, 110, c.angle - FRONT_HALF_ANGLE, c.angle + FRONT_HALF_ANGLE);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawPassIndicators() {
+    if (currentTurn === myTeam && selectedPiece && selectedAction === 'PASS' && ball.carrier === selectedPiece && !isAnimating) {
+        const teammates = pieces.filter(p => p.team === myTeam && p !== selectedPiece);
+        const enemies = pieces.filter(p => p.team !== myTeam);
+
+        teammates.forEach(teammate => {
+            let isBlocked = false;
+            enemies.forEach(enemy => {
+                const distToLane = distToSegment({ x: enemy.x, y: enemy.y }, { x: selectedPiece.x, y: selectedPiece.y }, { x: teammate.x, y: teammate.y });
+                if (distToLane < PieceRadius + 10) isBlocked = true;
+            });
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(selectedPiece.x, selectedPiece.y);
+            ctx.lineTo(teammate.x, teammate.y);
+            ctx.lineWidth = 3;
+            if (isBlocked) { ctx.strokeStyle = 'rgba(255, 77, 77, 0.7)'; ctx.setLineDash([4, 6]); }
+            else { ctx.strokeStyle = 'rgba(255, 204, 0, 0.8)'; ctx.setLineDash([6, 4]); }
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(teammate.x, teammate.y, PieceRadius + 8, 0, Math.PI * 2);
+            ctx.strokeStyle = isBlocked ? '#ff4d4d' : '#ffcc00';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.stroke();
+            ctx.restore();
+        });
+    }
+}
+
+function drawShootIndicator() {
+    if (currentTurn === myTeam && selectedPiece && selectedAction === 'SHOOT' && ball.carrier === selectedPiece && !isAnimating) {
+        const target = getShotTarget(selectedPiece.team, targetZone);
+        const blocker = findShotBlocker(selectedPiece, target.x, target.y);
+        const endX = blocker ? blocker.x : target.x;
+        const endY = blocker ? blocker.y : target.y;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(selectedPiece.x, selectedPiece.y);
+        ctx.lineTo(endX, endY);
+        ctx.lineWidth = 3;
+        if (blocker) { ctx.strokeStyle = 'rgba(255, 77, 77, 0.85)'; ctx.setLineDash([4, 6]); }
+        else { ctx.strokeStyle = 'rgba(255, 0, 85, 0.9)'; ctx.setLineDash([6, 4]); }
+        ctx.stroke();
+
+        // Goal-mouth target marker (always shown) and a ring on the defender who would block it.
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(target.x, target.y, 10, 0, Math.PI * 2);
+        ctx.strokeStyle = blocker ? 'rgba(255, 77, 77, 0.6)' : '#ff0055';
+        ctx.stroke();
+        if (blocker) {
+            ctx.beginPath();
+            ctx.arc(blocker.x, blocker.y, PieceRadius + 8, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ff4d4d';
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+function drawBall() {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, BallRadius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+}
+
+function formatClock(ms) {
+    const t = Math.ceil(ms / 1000);
+    return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+}
+
+function tickClock() {
+    const now = Date.now();
+    let dt = now - clockLast;
+    clockLast = now;
+    if (inLobby || matchOver || phase !== 'PLAY') return;
+    if (overlay.style.display === 'flex') return;   // paused while a goal/result overlay is up
+    if (mode === 'CPU') dt = Math.min(dt, 1000);    // a backgrounded CPU game shouldn't burn the clock
+    clockMs = Math.max(0, clockMs - dt);
+    matchTimerEl.textContent = formatClock(clockMs);
+    matchTimerEl.classList.toggle('low', clockMs <= 30000);
+    if (clockMs <= 0 && !isAnimating) endMatchByTime();
+}
+
+function endMatchByTime() {
+    if (matchOver) return;
+    matchOver = true;
+    timeUp = true;
+    selectedPiece = null;
+    selectedAction = null;
+    pointerPos = null;
+    updateActionButtons();
+    showMatchEnd();
+    // Player A is the authority for the final whistle; B ends locally and gets A's state too.
+    if (mode === 'ONLINE' && myTeam === TEAM_USER) pushGameState();
+}
+
+function render() {
+    tickClock();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawPitch();
+    drawTackleZone();
+    drawMovementRadius();
+    drawPassIndicators();
+    drawShootIndicator();
+    pieces.forEach(p => p.draw());
+    drawBall();
+    requestAnimationFrame(render);
+}
+
+function updateScoreboard() {
+    scoreP1Display.textContent = myTeam === TEAM_USER ? score.USER : score.CPU;
+    scoreP2Display.textContent = myTeam === TEAM_USER ? score.CPU : score.USER;
+}
+
+// Small in-pitch hint pill (local hints only). Timer is reset so overlapping hints don't hide each other early.
+function showLog(msg) {
+    logText.textContent = msg;
+    logText.style.display = 'block';
+    clearTimeout(logTimer);
+    logTimer = setTimeout(() => { logText.style.display = 'none'; }, 1800);
+}
+
+function showOverlay(title, desc) {
+    overlayTitle.textContent = title;
+    overlayDesc.textContent = desc;
+    overlayBtn.textContent = matchOver ? "RESTART MATCH" : "NEXT TURN";
+    overlay.style.display = 'flex';
+}
+
+function handleOverlayClick() {
+    overlay.style.display = 'none';
+
+    // Online: only the scorer's client resets the pitch, so the turn can't be flipped twice.
+    if (waitingForScorerReset && !matchOver) return;
+    waitingForScorerReset = false;
+
+    if (matchOver) {
+        score = { USER: 0, CPU: 0 };
+        updateScoreboard();
+        matchOver = false;
+        resultRecorded = false;
+        timeUp = false;
+        clockMs = matchDurationMs;
+        clockLast = Date.now();
+        matchSetups = null;
+            phase = 'SETUP';
+        roundNo++;
+        clearSavedSetup();
+        initTeams();
+        currentTurn = TEAM_USER;
+        actionHistory = [];
+        pendingEvent = null;
+        updateReplayButton();
+        turnIndicator.textContent = currentTurn === myTeam ? "YOUR TURN" : (mode === 'CPU' ? "CPU THINKING..." : "OPPONENT'S TURN");
+        openSetup(false);
+        if (mode === 'ONLINE') pushGameState();
+    } else {
+            initTeams();
+        switchTurn();
+    }
+}
+
+function showMatchEnd() {
+    waitingForScorerReset = false;
+    if (mode === 'CPU') clearCpuGame();
+    const mine = myTeam === TEAM_USER ? score.USER : score.CPU;
+    const theirs = myTeam === TEAM_USER ? score.CPU : score.USER;
+    const other = oppName().toUpperCase();
+    recordResult(mine, theirs);
+    let msg = mine > theirs ? 'YOU WIN THE MATCH!' : (mine < theirs ? `${other} WINS THE MATCH!` : "IT'S A DRAW!");
+    showOverlay(timeUp ? 'FULL TIME' : 'GAME OVER', msg);
+}
+
+// ---- TOASTS ----
+function showToast(message, type, duration = 3650) {
+    const el = document.createElement('div');
+    el.className = 'toast' + (type ? ' toast-' + type : '');
+    el.textContent = message;
+    toastContainer.appendChild(el);
+    while (toastContainer.children.length > 3) toastContainer.firstChild.remove();
+    setTimeout(() => el.remove(), duration);
+}
+
+// ---- LEAVE GAME ----
+function leaveGame() {
+    if (!confirm('Leave the game and return to the lobby?')) return;
+
+    if (mode === 'ONLINE' && gameRowId && sb) {
+        const leaveState = { ...serializeState(), leftBy: myToken };
+        sb.from('games').update({ state: leaveState, updated_at: new Date().toISOString() }).eq('id', gameRowId);
+    }
+
+    clearSession();
+    clearCpuGame();
+    clearSavedSetup();
+    teardownOnlineChannels();
+    returnToLobby();
+}
+
+function teardownOnlineChannels() {
+    if (presenceChannel) { presenceChannel.untrack(); sb.removeChannel(presenceChannel); presenceChannel = null; }
+    if (gameChannel) { sb.removeChannel(gameChannel); gameChannel = null; }
+    if (queueChannel) { sb.removeChannel(queueChannel); queueChannel = null; }
+}
+
+function returnToLobby() {
+    tableFrame.style.display = 'none';
+    lobbyFrame.style.display = 'block';
+    opponentProfile = null;
+    privatePanel.classList.remove('visible');
+    roomCodeBox.style.display = 'none';
+    lobbyCancel.style.display = 'none';
+    setLobbyStatus('');
+    history.replaceState(null, '', window.location.pathname);
+
+    inLobby = true;
+    mode = 'CPU';
+    gameRowId = null;
+    roomCode = null;
+    myToken = null;
+    matchOver = false;
+    isAnimating = false;
+    isReplaying = false;
+    actionHistory = [];
+    score = { USER: 0, CPU: 0 };
+    pendingEvent = null;
+    waitingForScorerReset = false;
+    timeUp = false;
+    phase = 'PLAY';
+    matchSetups = null;
+    closeSetupUI();
+    refreshResumeButton();
+    updateCoinUI();
+    refreshCoins();
+
+    hideReplayBanner();
+    overlay.style.display = 'none';
+    updateReplayButton();
+}
+
+// ---- REPLAY ----
+function showReplayBanner(text) {}
+
+function hideReplayBanner() {}
+
+function playReplay() {
+    if (actionHistory.length === 0 || isReplaying || isAnimating) return;
+    isReplaying = true;
+    updateReplayButton();
+
+    const liveState = {
+        pieces: pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y, p.angle)),
+        ballX: ball.x,
+        ballY: ball.y,
+        carrierId: ball.carrier ? ball.carrier.id : null,
+        selectedPiece,
+        selectedAction
+    };
+
+    selectedPiece = null;
+    selectedAction = null;
+    updateActionButtons();
+
+    const steps = actionHistory.slice();
+    let stepIndex = 0;
+
+    function playStep() {
+        if (stepIndex >= steps.length) {
+            setTimeout(() => {
+                pieces = liveState.pieces;
+                ball.x = liveState.ballX;
+                ball.y = liveState.ballY;
+                ball.carrier = liveState.carrierId ? pieces.find(p => p.id === liveState.carrierId) : null;
+                selectedPiece = liveState.selectedPiece;
+                selectedAction = liveState.selectedAction;
+                hideReplayBanner();
+                isReplaying = false;
+                updateActionButtons();
+            }, 500);
+            return;
+        }
+
+        const step = steps[stepIndex];
+        showReplayBanner(`${stepIndex + 1}/${steps.length}: ${step.description}`);
+
+        pieces = step.before.pieces.map(p => new Piece(p.id, p.team, p.role, p.x, p.y, p.angle));
+        ball.x = step.before.ball.x;
+        ball.y = step.before.ball.y;
+        ball.carrier = step.before.ball.carrierId ? pieces.find(p => p.id === step.before.ball.carrierId) : null;
+
+        setTimeout(() => {
+            animateRemoteUpdate(pieces, step.after.pieces, step.after.ball.x, step.after.ball.y, () => {
+                ball.carrier = step.after.ball.carrierId ? pieces.find(p => p.id === step.after.ball.carrierId) : null;
+                stepIndex++;
+                setTimeout(playStep, 400);
+            });
+        }, 150);
+    }
+
+    playStep();
+}
+
+window.addEventListener('resize', () => {
+    const prevPortrait = isPortrait;
+    updateCanvasOrientation();
+    if (prevPortrait !== isPortrait) {
+        if (inLobby) initTeams(); else rotateBoardInPlace();
+    } else resizeCanvasDisplay();
+});
+
+initTeams();
+updateScoreboard();
+window.__renderStarted = true;
+refreshResumeButton();
+render();
+initProfileFlow();
+</script>
+</body>
+</html>
