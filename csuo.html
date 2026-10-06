@@ -4261,5 +4261,375 @@ handleShootAction = function (shooter, zone = 'CENTER') {
     });
 };
 </script>
+<script>
+/* =====================================================================
+   CANTABALL: SMART CPU (3-ply look-ahead search)
+   CPU move -> your best reply -> CPU move, then judge the position.
+   It simulates the real rules: collisions, front-only tackles, fouls,
+   offside, interception odds, keeper save chances, facing direction.
+   ===================================================================== */
+const AI = { G: 9000, budget: 650, beamRoot: 10, beamUser: 5, hist: {}, key: '', deadline: 0 };
+const AI_ZONES = ['LEFT', 'CENTER', 'RIGHT'];
+const aiOther = t => t === TEAM_CPU ? TEAM_USER : TEAM_CPU;
+const aiLen = () => isPortrait ? canvas.height : canvas.width;
+function aiProg(team, p) {
+    if (isPortrait) return team === TEAM_USER ? canvas.height - p.y : p.y;
+    return team === TEAM_USER ? p.x : canvas.width - p.x;
+}
+
+// ---------- light-weight game state ----------
+function aiFromGame() {
+    return {
+        p: pieces.map(q => ({ id: q.id, team: q.team, role: q.role, x: q.x, y: q.y, angle: q.angle || 0 })),
+        b: { x: ball.x, y: ball.y, c: ball.carrier ? ball.carrier.id : null }
+    };
+}
+function aiById(s, id) { for (let i = 0; i < s.p.length; i++) if (s.p[i].id === id) return s.p[i]; return null; }
+function aiCarrier(s) { return s.b.c === null ? null : aiById(s, s.b.c); }
+function aiWith(s, id, ch, b) { return { p: s.p.map(q => q.id === id ? Object.assign({}, q, ch) : q), b: b || s.b }; }
+
+// After possession changes hands the new carrier turns away from the nearest opponent (same as the game).
+function aiFlipFacing(st, id) {
+    const c = aiById(st, id);
+    let near = null, nd = 1e9;
+    for (const q of st.p) {
+        if (q.team === c.team) continue;
+        const d = Math.hypot(q.x - c.x, q.y - c.y);
+        if (d < nd) { nd = d; near = q; }
+    }
+    return near ? aiWith(st, id, { angle: Math.atan2(c.y - near.y, c.x - near.x) }) : st;
+}
+
+// ---------- rules ----------
+function aiCanShoot(p) {
+    if (p.role === 'KEEPER') return false;
+    if (p.role === 'STAR') return true;
+    const g = getEnemyGoalCenter(p.team);
+    return Math.hypot(g.x - p.x, g.y - p.y) <= ShootRange;
+}
+
+function aiResolve(s, pc, tx, ty) {
+    if (pc.role === 'KEEPER') { const c = clampToKeeperBox(pc, tx, ty); tx = c.x; ty = c.y; }
+    tx = Math.max(PieceRadius, Math.min(canvas.width - PieceRadius, tx));
+    ty = Math.max(PieceRadius, Math.min(canvas.height - PieceRadius, ty));
+    if (Math.hypot(tx - pc.x, ty - pc.y) > MoveRadius) {
+        const a = Math.atan2(ty - pc.y, tx - pc.x);
+        tx = pc.x + Math.cos(a) * MoveRadius; ty = pc.y + Math.sin(a) * MoveRadius;
+    }
+    const dx = tx - pc.x, dy = ty - pc.y, dist = Math.hypot(dx, dy);
+    if (dist === 0) return { x: pc.x, y: pc.y, hit: null };
+    const ux = dx / dist, uy = dy / dist, minSpace = PieceRadius * 2 + 2;
+    let closest = dist, hit = null;
+    for (const o of s.p) {
+        if (o.id === pc.id) continue;
+        const ox = o.x - pc.x, oy = o.y - pc.y, proj = ox * ux + oy * uy;
+        if (proj > 0 && proj < closest + minSpace) {
+            const perp2 = ox * ox + oy * oy - proj * proj;
+            if (perp2 < minSpace * minSpace) {
+                const travel = proj - Math.sqrt(Math.max(0, minSpace * minSpace - perp2));
+                if (travel < closest) { closest = Math.max(0, travel); hit = o; }
+            }
+        }
+    }
+    return { x: pc.x + ux * closest, y: pc.y + uy * closest, hit };
+}
+
+function aiOffside(s, passer, rec) {
+    const t = passer.team, r = aiProg(t, rec);
+    if (r <= aiLen() / 2) return false;
+    if (r <= aiProg(t, passer) + 4) return false;
+    const v = s.p.filter(p => p.team !== t).map(p => aiProg(t, p)).sort((a, b) => b - a);
+    const line = v.length > 1 ? v[1] : (v[0] || 0);
+    return r > line + 4;
+}
+
+function aiBlocker(s, sh, tx, ty) {
+    const dx = tx - sh.x, dy = ty - sh.y, len2 = dx * dx + dy * dy;
+    if (len2 === 0) return null;
+    let best = null, bestT = Infinity;
+    for (const p of s.p) {
+        if (p.team === sh.team || p.role === 'KEEPER') continue;
+        const t = ((p.x - sh.x) * dx + (p.y - sh.y) * dy) / len2;
+        if (t <= 0 || t > 1) continue;
+        if (Math.hypot(p.x - (sh.x + t * dx), p.y - (sh.y + t * dy)) <= SHOT_BLOCK_RADIUS && t < bestT) { best = p; bestT = t; }
+    }
+    return best;
+}
+
+function aiKeeperSave(k, sh, target) {
+    const reach = typeof KEEPER_SAVE_REACH !== 'undefined' ? KEEPER_SAVE_REACH : 30;
+    const max = typeof KEEPER_SAVE_MAX !== 'undefined' ? KEEPER_SAVE_MAX : 0.9;
+    const d = distToSegment(k, sh, target);
+    if (d <= KEEPER_BLOCK_RADIUS) return max;
+    if (d >= reach) return 0;
+    return max * (1 - (d - KEEPER_BLOCK_RADIUS) / (reach - KEEPER_BLOCK_RADIUS));
+}
+function aiGoalChance(s, sh, target) {
+    let k = null;
+    for (const p of s.p) if (p.role === 'KEEPER' && p.team !== sh.team) { k = p; break; }
+    const save = k ? aiKeeperSave(k, sh, target) : 0;
+    if (save <= 0) return 1;
+    const dist = Math.hypot(target.x - sh.x, target.y - sh.y);
+    return (1 - Math.min(0.5, Math.max(0, (dist - 180) / 800))) * (1 - save);
+}
+function aiBestShot(s, sh) {
+    let best = 0;
+    for (const z of AI_ZONES) {
+        const t = getShotTarget(sh.team, z);
+        if (aiBlocker(s, sh, t.x, t.y)) continue;
+        best = Math.max(best, aiGoalChance(s, sh, t));
+    }
+    return best;
+}
+function aiLaneOpen(s, a, b) {
+    for (const e of s.p) {
+        if (e.team === a.team) continue;
+        if (distToSegment(e, a, b) < PieceRadius + 10) return false;
+    }
+    return true;
+}
+// Can an enemy tackle this carrier right now (from the front, path unobstructed)?
+function aiTackleable(s, c) {
+    for (const e of s.p) {
+        if (e.team === c.team) continue;
+        if (Math.hypot(c.x - e.x, c.y - e.y) > MoveRadius + PieceRadius * 2 + 4) continue;
+        if (tackleSide(c, e.x, e.y) !== 'FRONT') continue;
+        const r = aiResolve(s, e, c.x, c.y);
+        if (r.hit && r.hit.id === c.id) return true;
+    }
+    return false;
+}
+
+// ---------- action simulation (returns weighted outcomes, or null if illegal / a foul) ----------
+function aiApplyMove(s, a) {
+    const pc = aiById(s, a.id);
+    const r = aiResolve(s, pc, a.tx, a.ty);
+    if (Math.hypot(r.x - pc.x, r.y - pc.y) < 3) return null;
+    const ang = Math.atan2(r.y - pc.y, r.x - pc.x);
+    const c = aiCarrier(s), pick = PieceRadius + BallRadius + 15;
+    let newC = s.b.c, tackle = false;
+    if (r.hit) {
+        if (c && c.id === r.hit.id && r.hit.team !== pc.team) {
+            if (tackleSide(r.hit, pc.x, pc.y) === 'FRONT') { newC = pc.id; tackle = true; }
+            else return null;                                   // never foul
+        } else if (s.b.c === null && Math.hypot(r.x - s.b.x, r.y - s.b.y) < pick) newC = pc.id;
+    } else if (s.b.c === null && Math.hypot(r.x - s.b.x, r.y - s.b.y) < pick) newC = pc.id;
+    const b = newC === pc.id ? { x: r.x, y: r.y, c: pc.id } : { x: s.b.x, y: s.b.y, c: newC };
+    let ns = aiWith(s, pc.id, { x: r.x, y: r.y, angle: ang }, b);
+    if (tackle) ns = aiFlipFacing(ns, pc.id);
+    return [{ p: 1, s: ns }];
+}
+
+function aiApplyPass(s, a) {
+    const passer = aiById(s, a.id), rec = aiById(s, a.to);
+    if (!passer || !rec || aiOffside(s, passer, rec)) return null;
+    const base = aiWith(s, passer.id, { angle: Math.atan2(rec.y - passer.y, rec.x - passer.x) });
+    const safe = { p: base.p, b: { x: rec.x, y: rec.y, c: rec.id } };
+    const lane = s.p.filter(e => e.team !== passer.team && distToSegment(e, passer, rec) < PieceRadius + 10);
+    if (!lane.length) return [{ p: 1, s: safe }];
+    lane.sort((x, y) => Math.hypot(x.x - passer.x, x.y - passer.y) - Math.hypot(y.x - passer.x, y.y - passer.y));
+    const it = lane[0], pI = 1 - Math.pow(0.4, lane.length);
+    const stolen = aiFlipFacing({ p: base.p, b: { x: it.x, y: it.y, c: it.id } }, it.id);
+    return [{ p: 1 - pI, s: safe }, { p: pI, s: stolen }];
+}
+
+function aiApplyShoot(s, a) {
+    const sh = aiById(s, a.id);
+    if (!sh || !aiCanShoot(sh)) return null;
+    const target = getShotTarget(sh.team, a.zone);
+    const base = aiWith(s, sh.id, { angle: Math.atan2(target.y - sh.y, target.x - sh.x) });
+    const blk = aiBlocker(s, sh, target.x, target.y);
+    if (blk) return [{ p: 1, s: aiFlipFacing({ p: base.p, b: { x: blk.x, y: blk.y, c: blk.id } }, blk.id) }];
+    const p = aiGoalChance(s, sh, target), outs = [];
+    if (p > 0) outs.push({ p, goal: sh.team });
+    if (p < 1) {
+        let out = null, bd = 1e9;
+        for (const e of s.p) {
+            if (e.team === sh.team || e.role === 'KEEPER') continue;
+            const d = Math.hypot(e.x - target.x, e.y - target.y);
+            if (d < bd) { bd = d; out = e; }
+        }
+        if (out) outs.push({ p: 1 - p, s: aiFlipFacing({ p: base.p, b: { x: out.x, y: out.y, c: out.id } }, out.id) });
+    }
+    return outs;
+}
+function aiApply(s, a) {
+    return a.type === 'move' ? aiApplyMove(s, a) : a.type === 'pass' ? aiApplyPass(s, a) : aiApplyShoot(s, a);
+}
+
+// ---------- candidate actions ----------
+function aiGen(s, team) {
+    const acts = [], c = aiCarrier(s), foe = c && c.team !== team ? c : null;
+    let blockPts = [], gk = null;
+    if (foe && aiCanShoot(foe)) {   // points that screen the enemy's shooting lines + a keeper cover spot
+        const g = getEnemyGoalCenter(foe.team);
+        const dx = g.x - foe.x, dy = g.y - foe.y, d = Math.max(1, Math.hypot(dx, dy));
+        blockPts = [50, 85, 125].filter(t => t < d - 20).map(t => ({ x: foe.x + dx / d * t, y: foe.y + dy / d * t }));
+        gk = { x: g.x - dx / d * 40, y: g.y - dy / d * 40 };
+    }
+    for (const pc of s.p) {
+        if (pc.team !== team) continue;
+        const isK = pc.role === 'KEEPER', n = isK ? 8 : 14, ds = isK ? [55, 25] : [MoveRadius, 85];
+        for (let i = 0; i < n; i++) {
+            const a = Math.PI * 2 * i / n;
+            for (const d of ds) acts.push({ type: 'move', id: pc.id, tx: pc.x + Math.cos(a) * d, ty: pc.y + Math.sin(a) * d });
+        }
+        if (isK) { if (gk) acts.push({ type: 'move', id: pc.id, tx: gk.x, ty: gk.y }); continue; }
+        if (foe) acts.push({ type: 'move', id: pc.id, tx: foe.x, ty: foe.y });                  // tackle attempt
+        else if (!c) acts.push({ type: 'move', id: pc.id, tx: s.b.x, ty: s.b.y });             // go for the loose ball
+        blockPts.forEach(b => acts.push({ type: 'move', id: pc.id, tx: b.x, ty: b.y }));
+    }
+    if (c && c.team === team) {
+        for (const m of s.p) if (m.team === team && m.id !== c.id) acts.push({ type: 'pass', id: c.id, to: m.id });
+        if (aiCanShoot(c)) AI_ZONES.forEach(z => acts.push({ type: 'shoot', id: c.id, zone: z }));
+    }
+    return acts;
+}
+
+// ---------- position evaluation (from the CPU's point of view) ----------
+function aiEval(s, toMove) {
+    const L = aiLen(), G = AI.G, c = aiCarrier(s);
+    const cpu = [], usr = [];
+    for (const p of s.p) (p.team === TEAM_CPU ? cpu : usr).push(p);
+    let v = 0;
+
+    // CPU players must not crowd each other
+    for (let i = 0; i < cpu.length; i++) {
+        if (cpu[i].role === 'KEEPER') continue;
+        for (let j = i + 1; j < cpu.length; j++) {
+            if (cpu[j].role === 'KEEPER') continue;
+            const d = Math.hypot(cpu[i].x - cpu[j].x, cpu[i].y - cpu[j].y);
+            if (d < 64) v -= (64 - d) * 3;
+        }
+    }
+
+    if (!c) {   // loose ball: be closer to it than they are
+        let dc = 1e9, du = 1e9;
+        for (const p of cpu) dc = Math.min(dc, Math.hypot(p.x - s.b.x, p.y - s.b.y));
+        for (const p of usr) du = Math.min(du, Math.hypot(p.x - s.b.x, p.y - s.b.y));
+        return v + (du - dc) * 3 + (aiProg(TEAM_CPU, s.b) / L - 0.5) * 300;
+    }
+
+    const mine = c.team === TEAM_CPU, sign = mine ? 1 : -1, myTurn = toMove === c.team;
+    v += sign * (700 + (aiProg(c.team, c) / L) * 900);                       // possession + territory
+
+    if (aiCanShoot(c)) v += sign * aiBestShot(s, c) * (myTurn ? G * 0.95 : G * 0.3);   // scoring threat
+    if (!myTurn && aiTackleable(s, c)) v -= sign * 2000;                      // carrier exposed to a front tackle
+
+    if (mine) {
+        // ---- build the attack: supporters ahead, open lanes, onside, own shot chances ----
+        let cover = 0;
+        for (const m of cpu) {
+            if (m === c || m.role === 'KEEPER') continue;
+            v += (aiProg(TEAM_CPU, m) / L) * 140;
+            if (aiProg(TEAM_CPU, m) < aiProg(TEAM_CPU, c) - 30) cover++;
+            if (aiOffside(s, c, m)) { v -= 120; continue; }
+            if (aiLaneOpen(s, c, m)) {
+                v += 120;
+                if (aiProg(TEAM_CPU, m) > aiProg(TEAM_CPU, c) + 20) v += 110;
+            }
+            if (aiCanShoot(m)) v += aiBestShot(s, m) * 450 * (m.role === 'STAR' ? 1.6 : 1);
+        }
+        v += Math.min(cover, 2) * 70;      // keep someone back against the counter
+    } else {
+        // ---- defend: get goal-side of the carrier and close him down ----
+        for (const m of cpu) {
+            if (m.role === 'KEEPER') continue;
+            const d = Math.hypot(m.x - c.x, m.y - c.y);
+            if (aiProg(TEAM_USER, m) > aiProg(TEAM_USER, c) + 10 && d < 230) v += 110;
+            v += Math.max(0, 230 - d) * 0.35;
+        }
+    }
+    return v;
+}
+
+// ---------- search ----------
+const aiGoalVal = (team, depth) => (team === TEAM_CPU ? 1 : -1) * AI.G * (1 + 0.06 * depth);
+
+function aiSearch(s, team, depth) {
+    const other = aiOther(team), maxi = team === TEAM_CPU, list = [];
+    for (const a of aiGen(s, team)) {
+        const outs = aiApply(s, a);
+        if (!outs) continue;
+        let v = 0;
+        for (const o of outs) v += o.p * (o.goal ? aiGoalVal(o.goal, depth) : aiEval(o.s, other));
+        list.push({ outs, v });
+    }
+    if (!list.length) return aiEval(s, team);
+    list.sort((x, y) => maxi ? y.v - x.v : x.v - y.v);
+    if (depth <= 1) return list[0].v;
+    let best = null;
+    for (let i = 0; i < Math.min(AI.beamUser, list.length); i++) {
+        if (i > 0 && performance.now() > AI.deadline) break;
+        let v = 0;
+        for (const o of list[i].outs) v += o.p * (o.goal ? aiGoalVal(o.goal, depth) : aiSearch(o.s, other, depth - 1));
+        if (best === null || (maxi ? v > best : v < best)) best = v;
+    }
+    return best;
+}
+
+function aiPenalty(a) {      // don't shuffle a piece back to where it just was
+    if (a.type !== 'move' || !AI.hist[a.id]) return 0;
+    let pen = 0;
+    for (const q of AI.hist[a.id]) if (Math.hypot(q.x - a.tx, q.y - a.ty) < 30) pen -= 120;
+    return pen;
+}
+
+function aiChoose() {
+    const key = roundNo + '|' + (score.USER + score.CPU);
+    if (AI.key !== key) { AI.key = key; AI.hist = {}; }
+    AI.deadline = performance.now() + AI.budget;
+    const s0 = aiFromGame(), list = [];
+    for (const a of aiGen(s0, TEAM_CPU)) {
+        const outs = aiApply(s0, a);
+        if (!outs) continue;
+        let v = 0;
+        for (const o of outs) v += o.p * (o.goal ? aiGoalVal(o.goal, 3) : aiEval(o.s, TEAM_USER));
+        list.push({ a, outs, v });
+    }
+    if (!list.length) return null;
+    list.sort((x, y) => y.v - x.v);
+    let best = null;
+    for (let i = 0; i < Math.min(AI.beamRoot, list.length); i++) {
+        if (i > 0 && performance.now() > AI.deadline) break;
+        let v = 0;
+        for (const o of list[i].outs) v += o.p * (o.goal ? aiGoalVal(o.goal, 3) : aiSearch(o.s, TEAM_USER, 2));
+        v += aiPenalty(list[i].a) + (Math.random() - 0.5) * 40;
+        if (!best || v > best.v) best = { a: list[i].a, v };
+    }
+    return best ? best.a : list[0].a;
+}
+
+function aiExecute(a) {
+    const pc = pieces.find(p => p.id === a.id);
+    if (!pc) return false;
+    if (a.type === 'move') { handleMoveAction(pc, a.tx, a.ty); return true; }
+    if (a.type === 'pass') { const r = pieces.find(p => p.id === a.to); if (!r) return false; handlePassAction(pc, r); return true; }
+    if (a.type === 'shoot') { handleShootAction(pc, a.zone); return true; }
+    return false;
+}
+
+// ---------- plug into the game ----------
+const _basePlayCpuTurn = playCpuTurn;
+playCpuTurn = function () {
+    if (matchOver || mode !== 'CPU' || inLobby || phase !== 'PLAY' || isAnimating || isReplaying) return;
+    if (currentTurn !== TEAM_CPU) return;
+    let a = null;
+    try { a = aiChoose(); } catch (e) { console.warn('Smart CPU error', e); }
+    if (a) {
+        const pc = pieces.find(p => p.id === a.id), start = pc ? { x: pc.x, y: pc.y } : null;
+        try {
+            if (aiExecute(a)) {
+                if (a.type === 'move' && start) {
+                    (AI.hist[a.id] = AI.hist[a.id] || []).push(start);
+                    if (AI.hist[a.id].length > 4) AI.hist[a.id].shift();
+                }
+                return;
+            }
+        } catch (e) { console.warn('Smart CPU execute error', e); }
+    }
+    _basePlayCpuTurn();   // fallback to the old brain if anything goes wrong
+};
+</script>
 </body>
 </html>
