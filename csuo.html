@@ -4173,5 +4173,93 @@ function showToast(message, type, duration = 3650) {
     setTimeout(() => el.remove(), duration);
 }
 </script>
+<script>
+/* ===== Empty goal = guaranteed goal, chance only applies when the keeper can reach the shot ===== */
+goalChance = function (shooter, target) {
+    const k = pieces.find(p => p.role === 'KEEPER' && p.team !== shooter.team);
+
+    // Keeper missing, or too far from the shot line to reach it: guaranteed goal at any distance
+    if (!k || distToSegment(k, shooter, target) > KEEPER_REACH) return 1;
+
+    // Keeper can reach the line: distance accuracy and save chance apply
+    const dist = Math.hypot(target.x - shooter.x, target.y - shooter.y);
+    const accuracy = 1 - Math.min(0.5, Math.max(0, (dist - 180) / 800));
+    const d = distToSegment(k, shooter, target);
+    const save = d <= KEEPER_BLOCK_RADIUS ? 0.9 : 0.5;
+    return accuracy * (1 - save);
+};
+</script>
+<script>
+/* ===== Keeper save chance now depends on how close the keeper is to the shot line ===== */
+const KEEPER_SAVE_REACH = 30;   // beyond this distance from the shot line the keeper can't save it
+const KEEPER_SAVE_MAX   = 0.9;  // save chance when the keeper is standing right on the line
+
+function keeperSaveChance(keeper, shooter, target) {
+    if (!keeper) return 0;
+    const d = distToSegment(keeper, shooter, target);
+    if (d <= KEEPER_BLOCK_RADIUS) return KEEPER_SAVE_MAX;
+    if (d >= KEEPER_SAVE_REACH) return 0;
+    // fades smoothly from 90% on the line down to 0% at the edge of reach
+    return KEEPER_SAVE_MAX * (1 - (d - KEEPER_BLOCK_RADIUS) / (KEEPER_SAVE_REACH - KEEPER_BLOCK_RADIUS));
+}
+
+goalChance = function (shooter, target) {
+    const k = pieces.find(p => p.role === 'KEEPER' && p.team !== shooter.team);
+    const save = keeperSaveChance(k, shooter, target);
+    if (save <= 0) return 1;   // keeper can't reach it: guaranteed goal at any distance
+    const dist = Math.hypot(target.x - shooter.x, target.y - shooter.y);
+    const accuracy = 1 - Math.min(0.5, Math.max(0, (dist - 180) / 800));
+    return accuracy * (1 - save);
+};
+
+handleShootAction = function (shooter, zone = 'CENTER') {
+    const beforeSnap = snapshotBoard();
+    isAnimating = true;
+    ball.carrier = null;
+    const enemyTeam = shooter.team === TEAM_USER ? TEAM_CPU : TEAM_USER;
+    const target = getShotTarget(shooter.team, zone);
+    shooter.angle = Math.atan2(target.y - shooter.y, target.x - shooter.x);
+    const blocker = findShotBlocker(shooter, target.x, target.y);
+
+    if (blocker) {
+        animateBall(blocker.x, blocker.y, () => {
+            ball.carrier = blocker;
+            logAndToast('SHOT BLOCKED!');
+            isAnimating = false;
+            recordAction('SHOOT', 'Shot blocked!', beforeSnap);
+            switchTurn(enemyTeam);
+        });
+        return;
+    }
+
+    if (Math.random() > goalChance(shooter, target)) {
+        const keeper = pieces.find(k => k.role === 'KEEPER' && k.team === enemyTeam);
+        // only call it a save if the keeper was genuinely close to the shot line
+        const saved = !!keeper && keeperSaveChance(keeper, shooter, target) > 0;
+        const out = pieces.filter(p => p.team === enemyTeam && p.role !== 'KEEPER')
+            .sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))[0] || keeper;
+        animateBall(saved ? keeper.x : target.x, saved ? keeper.y : target.y, () => {
+            animateBall(out.x, out.y, () => {
+                ball.carrier = out;
+                logAndToast(saved ? 'SAVED!' : 'OFF TARGET!', 'bad');
+                isAnimating = false;
+                recordAction('SHOOT', saved ? 'Saved' : 'Off target', beforeSnap);
+                switchTurn(enemyTeam);
+            });
+        });
+        return;
+    }
+
+    animateBall(target.x, target.y, () => {
+        score[shooter.team]++;
+        updateScoreboard();
+        const scorerLabel = shooter.team === myTeam ? 'You' : oppName();
+        recordAction('GOAL', scorerLabel + ' scored!', beforeSnap);
+        showOverlay('GOAL!', scorerLabel + ' scored!');
+        isAnimating = false;
+        if (mode === 'ONLINE') pushGameState(shooter.team);
+    });
+};
+</script>
 </body>
 </html>
