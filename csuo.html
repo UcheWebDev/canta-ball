@@ -4087,5 +4087,91 @@ render = function () {
         '<li><b>Turn clock:</b> you have 9 seconds per turn. If it runs out, your turn is passed to the other player.</li>');
 })();
 </script>
+<script>
+/* ===== CANTABALL: winner of the ball turns away from the player who lost it ===== */
+// Tackles only work from the FRONT of the ball carrier. When possession changes hands
+// (tackle, interception, blocked/saved shot, offside free kick) the new carrier is turned
+// to face away from the nearest opponent, so that opponent is now BEHIND him and can't
+// immediately win the ball back with a legal tackle.
+ 
+let possTeam = null;   // which team held the ball just before the current action
+ 
+// Remember who had the ball while nothing is animating (= the state before the next action).
+const _renderForPoss = render;
+render = function () {
+    if (!isAnimating) possTeam = ball.carrier ? ball.carrier.team : null;
+    _renderForPoss();
+};
+ 
+const _switchTurnForPoss = switchTurn;
+switchTurn = function (nextTeam) {
+    const c = ball.carrier;
+    if (c && possTeam && c.team !== possTeam) {          // possession just changed hands
+        let near = null, nd = Infinity;
+        pieces.forEach(p => {
+            if (p.team === c.team) return;
+            const d = Math.hypot(p.x - c.x, p.y - c.y);
+            if (d < nd) { nd = d; near = p; }
+        });
+        if (near) c.angle = Math.atan2(c.y - near.y, c.x - near.x);   // face directly away from him
+    }
+    possTeam = c ? c.team : null;
+    return _switchTurnForPoss(nextTeam);
+};
+ 
+(function () {
+    const ul = document.querySelector('.howto ul');
+    if (ul) ul.insertAdjacentHTML('beforeend',
+        '<li><b>After winning the ball</b> your player is turned to face away from the opponent he won it from, so that opponent has to run round to challenge.</li>');
+})();
+</script>
+
+<style>
+/* ===== Twitch-style toasts: bottom-right, random colours ===== */
+#toast-container {
+    top: auto; bottom: 14px; right: 14px; left: auto;
+    transform: none; width: auto;
+    max-width: min(300px, calc(100vw - 28px));
+    align-items: flex-end;
+}
+#toast-container .toast {
+    --tc: #9146ff;
+    text-align: left;
+    border: none;
+    border-left: 4px solid var(--tc);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--tc) 30%, #141414), rgba(20,20,20,0.95));
+    color: #fff;
+    font-size: 13px;
+    padding: 9px 14px;
+    border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.55), 0 0 12px color-mix(in srgb, var(--tc) 45%, transparent);
+    opacity: 0;
+    transform: translateX(40px);
+    animation: tw-in 0.25s ease forwards, tw-out 0.4s ease forwards 3s;
+}
+@keyframes tw-in  { to { opacity: 1; transform: translateX(0); } }
+@keyframes tw-out { to { opacity: 0; transform: translateX(40px); } }
+</style>
+
+<script>
+const TOAST_COLORS = ['#9146ff','#ff4d9d','#00e5ff','#2ecc71','#ffcc00','#ff7a1a','#4d94ff','#ff4d4d','#b388ff','#1de9b6'];
+let lastToastColor = null;
+
+function showToast(message, type, duration = 3650) {
+    // random colour, never the same as the previous toast
+    let c;
+    do { c = TOAST_COLORS[Math.floor(Math.random() * TOAST_COLORS.length)]; } while (c === lastToastColor);
+    lastToastColor = c;
+
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.style.setProperty('--tc', c);
+    el.style.animationDelay = '0s, ' + Math.max(0, duration - 650) + 'ms';
+    el.textContent = message;
+    toastContainer.appendChild(el);
+    while (toastContainer.children.length > 5) toastContainer.firstChild.remove();
+    setTimeout(() => el.remove(), duration);
+}
+</script>
 </body>
 </html>
