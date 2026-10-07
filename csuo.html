@@ -4631,5 +4631,397 @@ playCpuTurn = function () {
     _basePlayCpuTurn();   // fallback to the old brain if anything goes wrong
 };
 </script>
+<style>
+/* ===== WORLD CUP ===== */
+#wc-overlay{position:fixed;inset:0;z-index:950;display:none;overflow-y:auto;padding:12px;
+  background:radial-gradient(ellipse at 50% -10%,rgba(255,204,0,.25),transparent 55%),#0b0d12;}
+.wc-box{width:100%;max-width:560px;margin:0 auto;background:rgba(21,23,29,.96);border:1px solid #2c2f38;border-radius:16px;padding:14px;text-align:center}
+.wc-box h2{margin:0 0 4px;color:#ffcc00;letter-spacing:3px;font-size:20px}
+.wc-sub{font-size:12px;color:#aaa;margin:0 0 12px}
+.wc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+.wc-team{display:flex;align-items:center;gap:10px;padding:10px;background:#1d2027;border:2px solid #333;border-radius:12px;color:#fff;font-weight:bold;font-size:13px;cursor:pointer;text-align:left;font-family:inherit}
+.wc-team:active{border-color:#ffcc00}
+.wc-team small{display:block;color:#999;font-weight:normal;font-size:10px}
+.wc-sw{flex:0 0 30px;width:30px;height:30px;border-radius:50%;border:2px solid #222;box-shadow:inset -4px -4px 8px rgba(0,0,0,.35),inset 3px 3px 6px rgba(255,255,255,.25)}
+.wc-vs{display:flex;align-items:center;justify-content:space-around;margin:12px 0;gap:6px;font-weight:bold}
+.wc-vs .wc-sw{width:56px;height:56px;flex-basis:56px;margin:0 auto 6px}
+.wc-vs b{color:#ffcc00;font-size:18px}
+.wc-msg{font-size:14px;margin:10px 0;color:#fff;line-height:1.5}
+.wc-br{display:flex;gap:8px;overflow-x:auto;padding:4px 0 8px;margin-top:10px;text-align:left}
+.wc-col{display:flex;flex-direction:column;min-width:102px;flex:1}
+.wc-rn{font-size:10px;color:#ffcc00;letter-spacing:1px;text-align:center;font-weight:bold;margin-bottom:6px}
+.wc-ms{flex:1;display:flex;flex-direction:column;justify-content:space-around;gap:6px}
+.wc-m{background:#1d2027;border:1px solid #2c2f38;border-radius:8px;overflow:hidden}
+.wc-t{display:flex;align-items:center;gap:5px;padding:4px 6px;font-size:11px;color:#999}
+.wc-t b{flex:1;font-size:11px}
+.wc-t i{width:12px;height:12px;border-radius:50%;border:1px solid #000;flex:0 0 12px}
+.wc-t.win{color:#fff;background:rgba(46,204,113,.15)}
+.wc-t.you b{color:#ffcc00}
+.wc-t+.wc-t{border-top:1px solid #2c2f38}
+#wc-card{background:linear-gradient(135deg,rgba(255,204,0,.22),rgba(255,153,0,.08));border-color:#ffcc00}
+</style>
+
+<script>
+/* =====================================================================
+   CANTABALL WORLD CUP: 16 nations, knockout, player vs AI
+   R16 (weak CPU) -> QF -> SF -> FINAL (strongest CPU)
+   ===================================================================== */
+const WC_TEAMS = [
+  {n:'Brazil',      c:'BRA', m:'#ffdf00', s:'#009c3b', p:'solid',  r:90},
+  {n:'Argentina',   c:'ARG', m:'#75aadb', s:'#ffffff', p:'stripes',r:91},
+  {n:'France',      c:'FRA', m:'#1d3f8f', s:'#ffffff', p:'solid',  r:90},
+  {n:'Germany',     c:'GER', m:'#ffffff', s:'#111111', p:'solid',  r:84},
+  {n:'Spain',       c:'ESP', m:'#c8102e', s:'#ffc400', p:'solid',  r:87},
+  {n:'England',     c:'ENG', m:'#ffffff', s:'#c8102e', p:'solid',  r:86},
+  {n:'Portugal',    c:'POR', m:'#c8102e', s:'#006600', p:'halves', r:85},
+  {n:'Netherlands', c:'NED', m:'#ff6a00', s:'#111111', p:'solid',  r:84},
+  {n:'Italy',       c:'ITA', m:'#0a5cb8', s:'#ffffff', p:'solid',  r:83},
+  {n:'Nigeria',     c:'NGA', m:'#008751', s:'#ffffff', p:'sash',   r:76},
+  {n:'Croatia',     c:'CRO', m:'#e4002b', s:'#ffffff', p:'checks', r:81},
+  {n:'Japan',       c:'JPN', m:'#2a52be', s:'#ffffff', p:'sash',   r:78},
+  {n:'Morocco',     c:'MAR', m:'#c1272d', s:'#006233', p:'solid',  r:80},
+  {n:'Senegal',     c:'SEN', m:'#ffffff', s:'#00853f', p:'solid',  r:77},
+  {n:'Ghana',       c:'GHA', m:'#ffd100', s:'#ce1126', p:'halves', r:73},
+  {n:'USA',         c:'USA', m:'#ffffff', s:'#bf0a30', p:'hoops',  r:75}
+];
+
+// The beam grows with the round, so the CPU gets sharper every time you advance.
+const WC_ROUNDS = [
+  {name:'ROUND OF 16',   short:'R16',   beamRoot:3,  beamUser:2, budget:250, noise:700, star:false, lvl:1},
+  {name:'QUARTER-FINAL', short:'QF',    beamRoot:5,  beamUser:3, budget:400, noise:300, star:true,  lvl:2},
+  {name:'SEMI-FINAL',    short:'SF',    beamRoot:10, beamUser:5, budget:650, noise:60,  star:true,  lvl:3},
+  {name:'FINAL',         short:'FINAL', beamRoot:14, beamUser:7, budget:900, noise:0,   star:true,  lvl:4}
+];
+const WC_KEY = 'cantaball_wc_v1', WC_EXTRA_MS = 120000;
+const AI_BASE = { beamRoot: AI.beamRoot, beamUser: AI.beamUser, budget: AI.budget };
+AI.noise = 0;
+
+const WC = { status:null, team:0, round:0, alive:[], log:[], inMatch:false, extra:false, opp:null, outRound:0, champ:null, kits:null };
+try { Object.assign(WC, JSON.parse(localStorage.getItem(WC_KEY)) || {}); } catch (e) {}
+WC.kits = null;
+let wcPending = null, wcResolved = false;
+
+function wcSave() {
+  try {
+    const { status, team, round, alive, log, inMatch, extra, opp, outRound, champ } = WC;
+    localStorage.setItem(WC_KEY, JSON.stringify({ status, team, round, alive, log, inMatch, extra, opp, outRound, champ }));
+  } catch (e) {}
+  wcUpdateCard();
+}
+const wcT = i => WC_TEAMS[i];
+const wcOppOf = () => WC.alive[WC.alive.indexOf(WC.team) ^ 1];
+
+// ---------- colours / kits ----------
+function hexRGB(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
+function colDist(a, b) { const x = hexRGB(a), y = hexRGB(b); return Math.hypot(x[0]-y[0], x[1]-y[1], x[2]-y[2]); }
+function colLum(c) { const x = hexRGB(c); return (0.299*x[0] + 0.587*x[1] + 0.114*x[2]) / 255; }
+function wcReadable(c) { return colLum(c) < 0.3 ? '#dddddd' : c; }
+
+function wcCss(t) {
+  const m = t.m, s = t.s;
+  switch (t.p) {
+    case 'stripes': return 'repeating-linear-gradient(90deg,' + m + ' 0 7px,' + s + ' 7px 14px)';
+    case 'hoops':   return 'repeating-linear-gradient(0deg,' + m + ' 0 7px,' + s + ' 7px 14px)';
+    case 'halves':  return 'linear-gradient(90deg,' + m + ' 50%,' + s + ' 50%)';
+    case 'sash':    return 'linear-gradient(135deg,' + m + ' 32%,' + s + ' 32% 68%,' + m + ' 68%)';
+    case 'checks':  return 'repeating-conic-gradient(' + m + ' 0% 25%,' + s + ' 0% 50%) 0 0/14px 14px';
+    default:        return m;
+  }
+}
+
+// If both teams wear similar colours, the CPU switches to its away kit.
+function wcBuildKits() {
+  const me = wcT(WC.team), op = wcT(WC.opp);
+  const home = { m: me.m, s: me.s, p: me.p };
+  let away = { m: op.m, s: op.s, p: op.p };
+  const alt = { m: op.s, s: op.m, p: op.p };
+  if (colDist(home.m, away.m) < 130 && colDist(home.m, alt.m) > colDist(home.m, away.m)) away = alt;
+  const pool = ['#ffd600', '#00c853', '#ff6d00', '#d500f9', '#00e5ff', '#212121'];
+  const sc = c => Math.min(colDist(c, home.m), colDist(c, away.m));
+  const g = pool.slice().sort((a, b) => sc(b) - sc(a));
+  home.gk = g[0]; away.gk = g[1];
+  WC.kits = { USER: home, CPU: away };
+}
+
+function wcDrawKit(x, y, r, k, isGK) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = isGK ? k.gk : k.m;
+  ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  if (!isGK) {
+    ctx.fillStyle = k.s;
+    const w = 2 * r / 5;
+    if (k.p === 'stripes') { for (let i = 1; i < 5; i += 2) ctx.fillRect(x - r + i * w, y - r, w, 2 * r); }
+    else if (k.p === 'hoops') { for (let i = 1; i < 5; i += 2) ctx.fillRect(x - r, y - r + i * w, 2 * r, w); }
+    else if (k.p === 'halves') ctx.fillRect(x, y - r, r, 2 * r);
+    else if (k.p === 'sash') { ctx.translate(x, y); ctx.rotate(-0.7); ctx.fillRect(-r, -r * 0.28, 2 * r, r * 0.56); ctx.rotate(0.7); ctx.translate(-x, -y); }
+    else if (k.p === 'checks') { const q = r / 2; for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) if ((i + j) % 2) ctx.fillRect(x - r + i * q, y - r + j * q, q, q); }
+    else { ctx.strokeStyle = k.s; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r - 2.5, 0, Math.PI * 2); ctx.stroke(); }
+  }
+  const g = ctx.createRadialGradient(x - r * 0.4, y - r * 0.4, 1, x, y, r * 1.1);
+  g.addColorStop(0, 'rgba(255,255,255,0.35)');
+  g.addColorStop(0.55, 'rgba(255,255,255,0)');
+  g.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = g; ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.lineWidth = 2; ctx.strokeStyle = '#222'; ctx.stroke();
+}
+
+const _wcPieceDraw = Piece.prototype.draw;
+Piece.prototype.draw = function () {
+  _wcPieceDraw.call(this);
+  const k = WC.kits && WC.kits[this.team];
+  if (!k) return;
+  const gk = this.role === 'KEEPER', star = this.role === 'STAR';
+  wcDrawKit(this.x, this.y, PieceRadius, k, gk);
+  ctx.save();
+  if (star) {
+    ctx.beginPath(); ctx.arc(this.x, this.y, PieceRadius, 0, Math.PI * 2);
+    ctx.lineWidth = 3; ctx.strokeStyle = '#ffd700'; ctx.stroke();
+    drawStar(this.x, this.y, 10, 4.5);
+    ctx.fillStyle = '#ffd700'; ctx.fill();
+    ctx.strokeStyle = '#7a5a00'; ctx.lineWidth = 1; ctx.stroke();
+  }
+  if (gk) {
+    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = colLum(k.gk) > 0.5 ? '#000' : '#fff';
+    ctx.fillText('GK', this.x, this.y);
+  }
+  ctx.restore();
+};
+
+// Scoreboard shows the nations in their kit colours.
+const _wcRefreshNames = refreshNames;
+refreshNames = function () {
+  _wcRefreshNames();
+  if (WC.inMatch && WC.kits) {
+    const me = wcT(WC.team), op = wcT(WC.opp);
+    labelP1.textContent = me.c; labelP1.title = me.n; labelP1.style.color = wcReadable(WC.kits.USER.m);
+    labelP2.textContent = op.c; labelP2.title = op.n; labelP2.style.color = wcReadable(WC.kits.CPU.m);
+  }
+};
+
+// ---------- AI difficulty ----------
+const _wcAiPenalty = aiPenalty;
+aiPenalty = function (a) { return _wcAiPenalty(a) + (AI.noise ? (Math.random() - 0.5) * AI.noise : 0); };
+
+function wcApplyMatchConfig() {
+  const c = WC_ROUNDS[WC.round];
+  AI.beamRoot = c.beamRoot; AI.beamUser = c.beamUser; AI.budget = c.budget; AI.noise = c.noise;
+  CPU_SETUP.star = c.star ? 4 : null;
+  wcBuildKits();
+}
+function wcDefaults() {
+  AI.beamRoot = AI_BASE.beamRoot; AI.beamUser = AI_BASE.beamUser; AI.budget = AI_BASE.budget; AI.noise = 0;
+  CPU_SETUP.star = 4;
+  WC.kits = null;
+  wcResolved = false; wcPending = null;
+}
+
+// ---------- tournament logic ----------
+function wcSimMatch(a, b) {
+  const A = wcT(a).r, B = wcT(b).r, pa = 1 / (1 + Math.pow(10, (B - A) / 35));
+  const aw = Math.random() < pa;
+  let ga, gb, pk = false;
+  if (Math.random() < 0.14) { ga = gb = Math.floor(Math.random() * 3); pk = true; }
+  else { const w = 1 + Math.floor(Math.random() * 3), l = Math.floor(Math.random() * w); ga = aw ? w : l; gb = aw ? l : w; }
+  return { a, b, ga, gb, w: aw ? a : b, pk };
+}
+
+function wcFinishMatch(userWon, mine, theirs, pk) {
+  const r = WC.round, alive = WC.alive, matches = [], winners = [];
+  for (let i = 0; i < alive.length; i += 2) {
+    const a = alive[i], b = alive[i + 1];
+    let m;
+    if (a === WC.team || b === WC.team) {
+      const opp = a === WC.team ? b : a, uw = userWon ? WC.team : opp;
+      m = a === WC.team ? { a, b, ga: mine, gb: theirs, w: uw, pk } : { a, b, ga: theirs, gb: mine, w: uw, pk };
+    } else m = wcSimMatch(a, b);
+    matches.push(m); winners.push(m.w);
+  }
+  WC.log[r] = matches;
+  if (!userWon) {
+    WC.status = 'out'; WC.outRound = r;
+    let cur = winners, rr = r + 1;
+    while (cur.length > 1) {
+      const ms = [], nx = [];
+      for (let i = 0; i < cur.length; i += 2) { const m = wcSimMatch(cur[i], cur[i + 1]); ms.push(m); nx.push(m.w); }
+      WC.log[rr] = ms; cur = nx; rr++;
+    }
+    WC.champ = cur[0];
+  } else if (r === 3) { WC.status = 'champ'; WC.champ = WC.team; }
+  else { WC.round = r + 1; WC.alive = winners; }
+  WC.inMatch = false; WC.extra = false;
+  wcSave();
+}
+
+function wcPens() {
+  let a = 0, b = 0;
+  for (let i = 0; i < 5; i++) { if (Math.random() < 0.76) a++; if (Math.random() < 0.76) b++; }
+  while (a === b) { if (Math.random() < 0.76) a++; if (Math.random() < 0.76) b++; }
+  return { a, b };
+}
+
+function wcPick(i) {
+  const others = WC_TEAMS.map((_, k) => k).filter(k => k !== i);
+  for (let k = others.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [others[k], others[j]] = [others[j], others[k]]; }
+  const alive = others.slice(); alive.splice(Math.floor(Math.random() * 16), 0, i);
+  Object.assign(WC, { status: 'playing', team: i, round: 0, alive, log: [], inMatch: false, extra: false, opp: null, outRound: 0, champ: null });
+  wcSave(); wcRender();
+}
+
+function wcStartMatch() {
+  WC.opp = wcOppOf(); WC.inMatch = true; WC.extra = false; wcResolved = false; wcPending = null;
+  wcSave();
+  wcApplyMatchConfig();
+  document.getElementById('wc-overlay').style.display = 'none';
+  mode = 'CPU'; myTeam = TEAM_USER; opponentProfile = null;
+  refreshNames();
+  presenceDot.style.display = 'none';
+  clearCpuGame();
+  enterGame();
+}
+
+// ---------- match flow hooks ----------
+const _wcShowMatchEnd = showMatchEnd;
+showMatchEnd = function () {
+  if (wcResolved) return;
+  if (!WC.inMatch) return _wcShowMatchEnd();
+  waitingForScorerReset = false;
+  clearCpuGame();
+  const mine = score.USER, theirs = score.CPU, me = wcT(WC.team), op = wcT(WC.opp);
+
+  if (mine === theirs && !WC.extra) {              // level at full time: golden-goal extra time
+    WC.extra = true; wcSave();
+    showOverlay('EXTRA TIME', 'Level at ' + mine + '–' + theirs + '. Golden goal: next goal wins!');
+    overlayBtn.textContent = 'KICK OFF';
+    wcPending = () => { matchOver = false; timeUp = false; clockMs = WC_EXTRA_MS; clockLast = Date.now(); initTeams(); switchTurn(); };
+    return;
+  }
+
+  const extraUsed = WC.extra;
+  let pk = null, userWon;
+  if (mine === theirs) { pk = wcPens(); userWon = pk.a > pk.b; } else userWon = mine > theirs;
+  recordResult(mine, theirs);
+  wcFinishMatch(userWon, mine, theirs, !!pk);
+  wcResolved = true;
+
+  const title = pk ? 'PENALTIES' : (extraUsed ? 'GOLDEN GOAL' : 'FULL TIME');
+  let msg = me.n + ' ' + mine + '–' + theirs + ' ' + op.n + (pk ? ' · pens ' + pk.a + '–' + pk.b : '');
+  msg += WC.status === 'champ' ? ' · YOU ARE WORLD CHAMPIONS! 🏆' : (userWon ? ' · You advance!' : ' · You are out.');
+  showOverlay(title, msg);
+  overlayBtn.textContent = WC.status === 'champ' ? '🏆 CELEBRATE' : (userWon ? 'NEXT ROUND' : 'CONTINUE');
+  wcPending = () => { returnToLobby(); wcDefaults(); wcOpen(); };
+};
+
+const _wcOverlayClick = handleOverlayClick;
+handleOverlayClick = function () {
+  if (wcPending) { const f = wcPending; wcPending = null; overlay.style.display = 'none'; f(); return; }
+  if (WC.inMatch && WC.extra && !matchOver && score.USER !== score.CPU) {   // golden goal scored
+    overlay.style.display = 'none'; matchOver = true; showMatchEnd(); return;
+  }
+  _wcOverlayClick();
+};
+
+const _wcLeave = leaveGame;
+leaveGame = function () {
+  if (!WC.inMatch) return _wcLeave();
+  if (!confirm('Leaving forfeits this World Cup match and knocks you out. Leave?')) return;
+  clearSession(); clearCpuGame(); clearSavedSetup(); teardownOnlineChannels(); returnToLobby();
+  wcFinishMatch(false, 0, 3, false); wcDefaults(); wcOpen();
+};
+
+const _wcCancelSetup = cancelGameFromSetup;
+cancelGameFromSetup = async function () {
+  const was = WC.inMatch;
+  await _wcCancelSetup();
+  if (was && inLobby) { WC.inMatch = false; wcSave(); wcDefaults(); wcOpen(); }   // match not played yet, back to the bracket
+};
+
+const _wcStartVsCpu = startVsCpu;
+startVsCpu = function () { WC.inMatch = false; wcSave(); wcDefaults(); _wcStartVsCpu(); };
+
+const _wcResume = resumeCpuGame;
+resumeCpuGame = function () {
+  if (WC.status === 'playing' && WC.inMatch) { WC.opp = wcOppOf(); wcApplyMatchConfig(); }
+  else { WC.inMatch = false; wcDefaults(); }
+  _wcResume();
+};
+
+// ---------- screens ----------
+function wcStars(n) { return '★'.repeat(n) + '☆'.repeat(4 - n); }
+function wcSw(t) { return '<div class="wc-sw" style="background:' + wcCss(t) + '"></div>'; }
+
+function wcTeamRow(id, m) {
+  const t = wcT(id), played = m.ga !== undefined;
+  const sc = played ? (id === m.a ? m.ga : m.gb) + (m.pk && m.w === id ? '*' : '') : '';
+  return '<div class="wc-t' + (m.w === id ? ' win' : '') + (id === WC.team ? ' you' : '') + '"><i style="background:' + wcCss(t) + '"></i><b>' + t.c + '</b><span>' + sc + '</span></div>';
+}
+function wcMatchHtml(m) {
+  if (!m) return '<div class="wc-m"><div class="wc-t"><i></i><b>—</b></div><div class="wc-t"><i></i><b>—</b></div></div>';
+  return '<div class="wc-m">' + wcTeamRow(m.a, m) + wcTeamRow(m.b, m) + '</div>';
+}
+function wcBracketHtml() {
+  let h = '<div class="wc-br">';
+  for (let r = 0; r < 4; r++) {
+    let ms = WC.log[r];
+    if (!ms && r === WC.round && WC.status === 'playing') {
+      ms = []; for (let i = 0; i < WC.alive.length; i += 2) ms.push({ a: WC.alive[i], b: WC.alive[i + 1] });
+    }
+    h += '<div class="wc-col"><div class="wc-rn">' + WC_ROUNDS[r].short + '</div><div class="wc-ms">';
+    for (let i = 0; i < (8 >> r); i++) h += wcMatchHtml(ms && ms[i]);
+    h += '</div></div>';
+  }
+  return h + '</div>';
+}
+
+function wcRender() {
+  const body = document.getElementById('wc-body');
+  let h = '';
+  if (!WC.status) {
+    h = '<h2>🏆 WORLD CUP</h2><p class="wc-sub">Pick your nation. 16 teams, knockout. The AI gets stronger every round.</p><div class="wc-grid">';
+    WC_TEAMS.forEach((t, i) => { h += '<button class="wc-team" onclick="wcPick(' + i + ')">' + wcSw(t) + '<span>' + t.n + '<small>' + t.c + '</small></span></button>'; });
+    h += '</div><div class="cancel-link" style="color:#aaa" onclick="wcClose()">← Back to lobby</div>';
+  } else if (WC.status === 'playing') {
+    const r = WC_ROUNDS[WC.round], me = wcT(WC.team), op = wcT(wcOppOf());
+    h = '<h2>🏆 WORLD CUP</h2><p class="wc-sub">' + r.name + ' · CPU level ' + wcStars(r.lvl) + '</p>' +
+      '<div class="wc-vs"><div>' + wcSw(me) + me.n + '</div><b>VS</b><div>' + wcSw(op) + op.n + '</div></div>' +
+      '<button class="lobby-btn" onclick="wcStartMatch()">▶ PLAY MATCH</button>' + wcBracketHtml() +
+      '<div class="cancel-link" style="color:#aaa" onclick="wcClose()">← Back to lobby</div> ' +
+      '<div class="cancel-link" onclick="wcAbandon()">Abandon tournament</div>';
+  } else {
+    const champ = WC.status === 'champ', me = wcT(WC.team), ch = wcT(WC.champ);
+    h = '<h2>' + (champ ? '🏆 WORLD CHAMPIONS!' : 'KNOCKED OUT') + '</h2>' +
+      '<p class="wc-msg">' + (champ ? me.n + ' win the CantaBall World Cup!' : 'You went out in the ' + WC_ROUNDS[WC.outRound].name + '.<br>' + ch.n + ' won the cup.') + '</p>' +
+      wcBracketHtml() +
+      '<button class="lobby-btn" onclick="wcNew()">NEW WORLD CUP</button>' +
+      '<div class="cancel-link" style="color:#aaa" onclick="wcClose()">← Back to lobby</div>';
+  }
+  body.innerHTML = h;
+  wcUpdateCard();
+}
+
+function wcOpen()  { document.getElementById('wc-overlay').style.display = 'block'; wcRender(); }
+function wcClose() { document.getElementById('wc-overlay').style.display = 'none'; }
+function wcNew()   { Object.assign(WC, { status: null, log: [], alive: [], round: 0 }); wcSave(); wcRender(); }
+function wcAbandon() { if (confirm('Abandon this World Cup run?')) wcNew(); }
+
+function wcUpdateCard() {
+  const el = document.getElementById('wc-sub'); if (!el) return;
+  el.textContent = WC.status === 'playing' ? 'Continue · ' + wcT(WC.team).n + ' · ' + WC_ROUNDS[WC.round].name
+    : WC.status === 'champ' ? '🏆 You are champions! Play again' : 'AI knockout · 16 nations · jerseys';
+}
+
+// ---------- install ----------
+document.querySelector('.modes').insertAdjacentHTML('afterbegin',
+  '<button id="wc-card" class="mode-card" onclick="wcOpen()"><span class="mode-ico">🏆</span><span class="mode-txt"><b>WORLD CUP</b><small id="wc-sub"></small></span><span class="chev">›</span></button>');
+document.body.insertAdjacentHTML('beforeend', '<div id="wc-overlay"><div class="wc-box" id="wc-body"></div></div>');
+wcUpdateCard();
+(function () {
+  const ul = document.querySelector('.howto ul');
+  if (ul) ul.insertAdjacentHTML('beforeend', '<li><b>World Cup:</b> pick a nation and win four knockout rounds. Drawn matches go to golden-goal extra time, then penalties. The CPU gets sharper every round. Leaving a match forfeits it.</li>');
+})();
+</script>
 </body>
 </html>
