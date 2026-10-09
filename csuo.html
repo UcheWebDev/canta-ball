@@ -5459,5 +5459,341 @@ handleOverlayClick = function () {
     if (ul) ul.insertAdjacentHTML('beforeend', '<li><b>Watch Match:</b> open <b>WATCH MATCH</b> in the lobby to see every live game (player vs player, vs CPU and World Cup) and join as a spectator. Spectators can only watch.</li>');
 })();
 </script>
+<!-- PASTE this block at the very end of your file, right BEFORE the final </body> (after the watch block) -->
+<style>
+#demo-panel { display: none; width: 100%; margin-top: 8px; background: #111; border: 2px solid #333; border-radius: 6px; padding: 10px; text-align: left; }
+.dp-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #999; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+#dp-badge { background: #4d94ff; color: #fff; padding: 2px 8px; border-radius: 10px; font-weight: bold; display: none; }
+#dp-title { color: #ffcc00; font-weight: bold; font-size: 15px; margin-bottom: 6px; }
+#dp-lines { margin: 0 0 6px; padding-left: 18px; font-size: 12.5px; color: #ddd; line-height: 1.55; }
+#dp-rule { display: none; font-size: 12px; color: #cfe3ff; background: rgba(77,148,255,.15); border-left: 3px solid #4d94ff; padding: 6px 8px; margin-bottom: 6px; border-radius: 4px; line-height: 1.5; }
+#dp-result { display: none; font-size: 12.5px; color: #b8ffcf; background: rgba(46,204,113,.15); border-left: 3px solid #2ecc71; padding: 6px 8px; margin-bottom: 6px; border-radius: 4px; line-height: 1.5; }
+.dp-ctl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dp-ctl button { flex: 1 1 22%; min-height: 44px; font-size: 12px; font-weight: bold; color: #111; background: #ffcc00; border: 2px solid #ffe600; border-radius: 8px; cursor: pointer; }
+.dp-ctl button.alt { background: #222; color: #ffcc00; border-color: #444; }
+</style>
+
+<script>
+/* ===== CANTABALL LEARN TO PLAY: two AIs play each other, every move is explained =====
+   Uses the same smart AI as the CPU opponent for BOTH sides (RED = USER side, BLUE = CPU side).
+   Before each move a box explains what is about to happen and why, the piece/line is highlighted on the pitch,
+   and after the move the result is shown. New rules pop up the first time they matter. */
+const DEMO_RULES = {
+  loose: 'LOOSE BALL: when nobody has the ball, run a player onto it (get within a few steps) to pick it up.',
+  dribble: 'MOVE: a player can run anywhere inside the dashed circle (about 140px). Moving uses your whole turn. He then faces the way he ran.',
+  support: 'SUPPORT RUN: you only get ONE action per turn, so a teammate runs into open space to become a passing option. Stay level with or behind the last defender, or a pass to him is offside.',
+  tackle: 'TACKLE: to win the ball, run into the ball carrier from the FRONT (inside the white wedge in front of him). Hitting him from the side or back is a foul and gives him a free kick.',
+  block: 'BLOCK THE LINE: a defender standing on the shooting line stops the shot, so defenders stay between the carrier and the goal.',
+  press: 'PRESSING: closing the carrier down forces mistakes, but stay in FRONT of him so your tackle is legal.',
+  pass: 'PASS: only the ball carrier can pass. If an opponent stands near the pass line he may intercept it.',
+  shoot: 'SHOOT: pick LEFT / CENTER / RIGHT. A defender on the line blocks the shot; otherwise the % chance depends on distance and where the keeper stands. Normal players must be within range of the goal.',
+  keeper: 'GOALKEEPER: moves only inside his penalty box. A keeper close to the shot line saves most shots; far from it he cannot stop them.',
+  star: '⭐ STAR PLAYER: can shoot from anywhere on the pitch, so defenders must never leave him free.',
+  turnaway: 'AFTER WINNING THE BALL the player turns away from the opponent he took it from, so that opponent cannot tackle him straight back from the front.',
+  offside: 'OFFSIDE: a pass to a player in the opponent half who is past the second-last defender (the keeper counts) is offside and gives a free kick.'
+};
+const DEMO_SPEEDS = [ { n: 'SLOW', prev: 6500, res: 3200 }, { n: 'NORMAL', prev: 4500, res: 2400 }, { n: 'FAST', prev: 2400, res: 1300 } ];
+const DEMO_CAP = 45;                       // the lesson ends after this many turns if nobody has reached 3 goals
+let DEMO = null;
+const dCap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const dTeam = t => t === TEAM_USER ? 'RED' : 'BLUE';
+
+document.getElementById('canvas-container').insertAdjacentHTML('afterend',
+  '<div id="demo-panel"><div class="dp-head"><span id="dp-step"></span><span id="dp-badge">NEW RULE</span></div>' +
+  '<div id="dp-title"></div><ul id="dp-lines"></ul><div id="dp-rule"></div><div id="dp-result"></div>' +
+  '<div class="dp-ctl"><button id="dp-next" onclick="demoNext()">▶ START LESSON</button><button id="dp-play" class="alt" onclick="demoPlayPause()">⏸ PAUSE</button>' +
+  '<button id="dp-speed" class="alt" onclick="demoSpeed()">SPEED: NORMAL</button><button class="alt" onclick="demoExit()">✕ EXIT</button></div></div>');
+const dpEl = id => document.getElementById(id);
+
+function demoShowPlan(info) {
+  dpEl('dp-step').textContent = 'Move ' + DEMO.step + ' · ' + dTeam(DEMO.plan.team) + ' (AI)';
+  dpEl('dp-title').textContent = info.title;
+  dpEl('dp-lines').innerHTML = info.lines.map(l => '<li>' + l + '</li>').join('');
+  dpEl('dp-rule').style.display = info.rule ? 'block' : 'none'; dpEl('dp-rule').textContent = info.rule || '';
+  dpEl('dp-badge').style.display = info.rule ? 'inline-block' : 'none';
+  dpEl('dp-result').style.display = 'none';
+}
+function demoShowResult(txt) { const r = dpEl('dp-result'); r.textContent = '➜ ' + txt; r.style.display = 'block'; }
+
+// ---------- explanations ----------
+function dName(p) {
+  if (p.role === 'KEEPER') return 'the goalkeeper';
+  const slot = ((p.id - 1) % 5) + 1;
+  return (p.role === 'STAR' ? 'the ⭐ star ' : 'the ') + (SLOT_NAMES[slot] || 'player').toLowerCase();
+}
+function demoExplain(a, team) {
+  const T = dTeam(team), foe = aiOther(team), pc = pieces.find(p => p.id === a.id), c = ball.carrier, L = [];
+  let title, key;
+  if (a.type === 'shoot') {
+    key = 'shoot';
+    const t = getShotTarget(team, a.zone), pct = Math.round(goalChance(pc, t) * 100);
+    const k = pieces.find(p => p.role === 'KEEPER' && p.team === foe);
+    title = T + ' SHOOTS at the ' + a.zone + ' side!';
+    L.push(dCap(dName(pc)) + ' takes the shot. Chance to score: <b>' + pct + '%</b>.');
+    L.push(k && keeperSaveChance(k, pc, t) > 0 ? 'The keeper is close to this line, so he can still save it.' : 'The keeper is too far from this line to reach it.');
+    L.push(pc.role === 'STAR' ? 'A star can shoot from anywhere, even a long way out.' : 'He is inside shooting range and the line is not blocked by a defender.');
+    L.push('Why: it is the best scoring chance available.');
+  } else if (a.type === 'pass') {
+    key = 'pass';
+    const rc = pieces.find(p => p.id === a.to), blocked = cpuLaneBlocked(pc, rc, foe), adv = attackCoord(team, rc) - attackCoord(team, pc);
+    title = T + ' PASSES to ' + dName(rc);
+    L.push(blocked ? 'A defender is near the pass line - there is a risk of interception.' : 'The pass line is clear of defenders, so the pass should arrive.');
+    L.push(adv > 20 ? 'It moves the ball forward towards the goal.' : (adv < -20 ? 'A safe pass backwards to keep possession.' : 'A sideways pass to change the angle of attack.'));
+    if (attackCoord(team, rc) > (isPortrait ? canvas.height : canvas.width) / 2) { L.push('Offside check: the receiver is not past the second-last defender, so it is legal.'); }
+    if (canShootFrom(rc) && bestGoalChance(rc) > 0.45) L.push('Next turn the receiver will have a good shot.');
+  } else {
+    const dx = a.tx - pc.x, dy = a.ty - pc.y, enemyNear = pieces.filter(p => p.team === foe).reduce((m, p) => Math.min(m, Math.hypot(p.x - pc.x, p.y - pc.y)), 999);
+    if (pc.role === 'KEEPER') {
+      key = 'keeper'; title = T + ' moves the goalkeeper';
+      L.push('He shuffles inside his box to stand on the line between the shooter and the goal.');
+      L.push('A keeper on the shot line saves most shots, so this lowers the opponent\'s chance to score.');
+    } else if (c && c.team === team && c.id === pc.id) {
+      key = 'dribble'; const fwd = attackCoord(team, { x: a.tx, y: a.ty }) - attackCoord(team, pc);
+      title = T + ' runs with the ball';
+      L.push(dCap(dName(pc)) + ' has the ball and runs ' + (fwd > 15 ? 'forward to get closer to goal' : (fwd < -15 ? 'back to escape pressure' : 'sideways to find space')) + '.');
+      L.push(enemyNear < 110 ? 'An opponent is close, so he looks for a safer spot.' : 'No opponent is close, so he can advance freely.');
+      L.push('Remember: moving uses the whole turn - he cannot pass or shoot after running.');
+    } else if (c && c.team === team) {
+      key = 'support'; title = T + ': ' + dName(pc) + ' makes a supporting run';
+      L.push('The ball carrier is busy, so a teammate moves into open space to give him a passing option.');
+      L.push('He stays onside and out of reach of the defenders.');
+    } else if (c && Math.abs(a.tx - c.x) < 2 && Math.abs(a.ty - c.y) < 2) {
+      key = 'tackle'; title = T + ' goes for a TACKLE!';
+      L.push(dCap(dName(pc)) + ' runs at the ball carrier from the <b>front</b>, so the tackle is legal.');
+      L.push('If he reaches him, he wins the ball. Tackling from the side or back would be a foul.');
+    } else if (c) {
+      const shooter = canShootFrom(c);
+      key = shooter ? 'block' : 'press'; title = T + ' defends';
+      L.push(shooter ? dCap(dName(pc)) + ' moves onto the line between the ball carrier and the goal to block shots.' : dCap(dName(pc)) + ' closes down the ball carrier.');
+      L.push(shooter ? 'The carrier is in shooting range, so stopping the line matters most.' : 'Pressing him makes a mistake or a tackle more likely next turn.');
+    } else {
+      key = 'loose'; title = T + ' goes for the loose ball';
+      L.push(dCap(dName(pc)) + ' is the closest player, so he runs to pick the ball up.');
+      L.push('Whoever gets the ball first controls the game.');
+    }
+  }
+  let rule = null;
+  const keys = [key]; if (pc.role === 'STAR' && a.type !== 'move') keys.push('star');
+  for (const k of keys) if (!DEMO.seen[k]) { DEMO.seen[k] = 1; rule = (rule ? rule + '  ' : '') + DEMO_RULES[k]; }
+  return { title, lines: L, rule };
+}
+
+// ---------- AI (the same brain for both sides; RED is mirrored so it can be searched as "CPU") ----------
+function demoMirror(s) {
+  const W = canvas.width, H = canvas.height;
+  return { p: s.p.map(q => ({ id: q.id, team: aiOther(q.team), role: q.role, x: W - q.x, y: H - q.y, angle: q.angle + Math.PI })), b: { x: W - s.b.x, y: H - s.b.y, c: s.b.c } };
+}
+function demoPen(team, a) {
+  if (a.type !== 'move') return 0;
+  const h = (DEMO.hist[team] || {})[a.id]; if (!h) return 0;
+  let pen = 0; h.forEach(q => { if (Math.hypot(q.x - a.tx, q.y - a.ty) < 30) pen -= 120; });
+  return pen;
+}
+function demoPick(s0, team) {
+  AI.deadline = performance.now() + 450;
+  const list = [];
+  for (const a of aiGen(s0, TEAM_CPU)) {
+    const outs = aiApply(s0, a); if (!outs) continue;
+    let v = 0; for (const o of outs) v += o.p * (o.goal ? aiGoalVal(o.goal, 3) : aiEval(o.s, TEAM_USER));
+    list.push({ a, outs, v });
+  }
+  if (!list.length) return null;
+  list.sort((x, y) => y.v - x.v);
+  let best = null;
+  for (let i = 0; i < Math.min(8, list.length); i++) {
+    if (i > 0 && performance.now() > AI.deadline) break;
+    let v = 0; for (const o of list[i].outs) v += o.p * (o.goal ? aiGoalVal(o.goal, 3) : aiSearch(o.s, TEAM_USER, 2));
+    v += demoPen(team, list[i].a) + (Math.random() - 0.5) * 60;
+    if (!best || v > best.v) best = { a: list[i].a, v };
+  }
+  return best ? best.a : list[0].a;
+}
+function demoPlan() {
+  const team = currentTurn, W = canvas.width, H = canvas.height, flip = team === TEAM_USER;
+  let s = aiFromGame(); if (flip) s = demoMirror(s);
+  const a = demoPick(s, team); if (!a) return null;
+  if (!flip) return a;
+  const r = Object.assign({}, a);
+  if (r.type === 'move') { r.tx = W - a.tx; r.ty = H - a.ty; }
+  if (r.type === 'shoot') r.zone = a.zone === 'LEFT' ? 'RIGHT' : (a.zone === 'RIGHT' ? 'LEFT' : 'CENTER');
+  return r;
+}
+
+// ---------- lesson flow ----------
+function demoStart() {
+  if (!inLobby) return;
+  mode = 'DEMO'; myTeam = 'SPEC'; phase = 'WATCH'; inLobby = false; matchOver = false; timeUp = false;
+  score = { USER: 0, CPU: 0 }; currentTurn = TEAM_USER;
+  matchSetups = { USER: normSetup({ star: 4 }), CPU: normSetup({ star: null }) };   // RED has a star so you can see how it plays
+  DEMO = { step: 0, phase: 'intro', auto: true, sp: 1, timer: null, plan: null, preview: null, seen: {}, hist: {}, turns: 0, prev: { USER: 0, CPU: 0 }, gotResult: false, runAt: 0 };
+  lobbyFrame.style.display = 'none'; tableFrame.style.display = 'flex';
+  dpEl('action-bar').style.display = 'none'; dpEl('demo-panel').style.display = 'block';
+  dpEl('leave-link').textContent = '← Exit lesson'; presenceDot.style.display = 'none';
+  overlay.style.display = 'none'; overlayBtn.style.display = '';
+  updateCanvasOrientation(); initTeams(); resizeCanvasDisplay(); updateScoreboard();
+  labelP1.textContent = 'RED (AI)'; labelP2.textContent = 'BLUE (AI)'; labelP1.style.color = '#ff4d4d'; labelP2.style.color = '#4d94ff';
+  matchTimerEl.textContent = 'AI vs AI'; turnIndicator.textContent = 'LESSON'; turnIndicator.style.color = ''; turnIndicator.style.borderColor = '#ffcc00';
+  dpEl('dp-step').textContent = 'Lesson'; dpEl('dp-badge').style.display = 'none'; dpEl('dp-result').style.display = 'none';
+  dpEl('dp-title').textContent = '🎓 Welcome! Watch two AI teams play';
+  dpEl('dp-lines').innerHTML = ['It is <b>turn-based</b>: each turn a team does ONE action - move a player, pass, or shoot.',
+    'Before every move a box explains <b>what</b> will happen and <b>why</b>. The player and the line are highlighted on the pitch.',
+    'RED (with a ⭐ star player) plays BLUE. First to 3 goals wins.',
+    'Tap <b>NEXT</b> to go step by step, or let it run on <b>AUTO</b>. Change the speed any time.'].map(l => '<li>' + l + '</li>').join('');
+  dpEl('dp-rule').style.display = 'none';
+  dpEl('dp-next').textContent = '▶ START LESSON'; dpEl('dp-play').textContent = '⏸ PAUSE'; dpEl('dp-speed').textContent = 'SPEED: NORMAL';
+}
+
+function demoNext() { if (!DEMO) return; if (DEMO.phase === 'intro') { dpEl('dp-next').textContent = '▶ NEXT'; DEMO.phase = 'idle'; } demoAdvance(); }
+function demoPlayPause() {
+  if (!DEMO) return;
+  DEMO.auto = !DEMO.auto; clearTimeout(DEMO.timer);
+  dpEl('dp-play').textContent = DEMO.auto ? '⏸ PAUSE' : '▶ AUTO';
+  if (DEMO.auto && DEMO.phase !== 'intro') demoSchedule();
+}
+function demoSpeed() { if (!DEMO) return; DEMO.sp = (DEMO.sp + 1) % DEMO_SPEEDS.length; dpEl('dp-speed').textContent = 'SPEED: ' + DEMO_SPEEDS[DEMO.sp].n; }
+function demoSchedule() {          // in AUTO mode, keep the lesson moving
+  clearTimeout(DEMO.timer);
+  if (!DEMO.auto || matchOver) return;
+  if (DEMO.phase === 'preview') DEMO.timer = setTimeout(demoAdvance, DEMO_SPEEDS[DEMO.sp].prev);
+  else if (DEMO.phase === 'result' || DEMO.phase === 'idle') DEMO.timer = setTimeout(demoAdvance, DEMO_SPEEDS[DEMO.sp].res);
+}
+
+function demoAdvance() {
+  if (mode !== 'DEMO' || !DEMO || DEMO.phase === 'over' || DEMO.phase === 'intro') return;
+  clearTimeout(DEMO.timer);
+  if (DEMO.phase === 'planning' || DEMO.phase === 'running' || isAnimating) return;
+  if (DEMO.phase === 'preview') { demoRun(); return; }
+  if (overlay.style.display === 'flex') { handleOverlayClick(); return; }       // goal screen: continue
+  DEMO.phase = 'planning'; dpEl('dp-title').textContent = 'Thinking…';
+  setTimeout(() => {
+    if (mode !== 'DEMO' || !DEMO) return;
+    let a = null; try { a = demoPlan(); } catch (e) { console.warn('demo AI error', e); }
+    if (!a) { DEMO.phase = 'result'; switchTurn(); return; }
+    DEMO.step++; DEMO.plan = { a, team: currentTurn }; DEMO.preview = a; DEMO.gotResult = false;
+    demoShowPlan(demoExplain(a, currentTurn));
+    DEMO.phase = 'preview'; demoSchedule();
+  }, 40);
+}
+function demoRun() {
+  if (!DEMO || DEMO.phase !== 'preview' || !DEMO.plan) return;
+  clearTimeout(DEMO.timer);
+  const a = DEMO.plan.a, team = DEMO.plan.team, pc = pieces.find(p => p.id === a.id);
+  DEMO.phase = 'running'; DEMO.preview = null; DEMO.runAt = Date.now();
+  if (a.type === 'move' && pc) {      // remember where he came from (in the AI's mirrored view) to avoid shuffling back and forth
+    const W = canvas.width, H = canvas.height, q = team === TEAM_USER ? { x: W - pc.x, y: H - pc.y } : { x: pc.x, y: pc.y };
+    const h = (DEMO.hist[team] = DEMO.hist[team] || {}); (h[a.id] = h[a.id] || []).push(q); if (h[a.id].length > 4) h[a.id].shift();
+  }
+  let ok = false; try { ok = aiExecute(a); } catch (e) { console.warn(e); }
+  if (!ok) { DEMO.phase = 'result'; switchTurn(); }
+}
+function demoExit() {
+  if (mode !== 'DEMO') return;
+  if (DEMO) clearTimeout(DEMO.timer);
+  DEMO = null;
+  overlay.style.display = 'none'; overlayBtn.style.display = ''; isAnimating = false;
+  dpEl('demo-panel').style.display = 'none'; dpEl('action-bar').style.display = ''; dpEl('leave-link').textContent = 'Leave Game';
+  returnToLobby(); myTeam = TEAM_USER;
+}
+
+// stuck-protection: never leave the lesson frozen
+setInterval(() => {
+  if (mode === 'DEMO' && DEMO && DEMO.phase === 'running' && !isAnimating && overlay.style.display !== 'flex' && Date.now() - DEMO.runAt > 4000) switchTurn();
+}, 1000);
+
+// ---------- hooks ----------
+const _dLog = logAndToast;
+logAndToast = function (msg, type) {
+  if (mode === 'DEMO' && DEMO && msg) {
+    DEMO.gotResult = true; let t = msg;
+    if (/tackle|intercept|saved|blocked|off target/i.test(msg) && !/foul/i.test(msg) && !DEMO.seen.turnaway && /tackle|intercept|saved|blocked/i.test(msg)) { DEMO.seen.turnaway = 1; t += '  ·  NEW RULE: ' + DEMO_RULES.turnaway; }
+    if (/offside/i.test(msg) && !DEMO.seen.offside) { DEMO.seen.offside = 1; t += '  ·  NEW RULE: ' + DEMO_RULES.offside; }
+    demoShowResult(t);
+  }
+  return _dLog(msg, type);
+};
+const _dSwitch = switchTurn;
+switchTurn = function (n) {
+  _dSwitch(n);
+  if (mode !== 'DEMO' || !DEMO || matchOver) return;
+  DEMO.turns++;
+  turnIndicator.textContent = dTeam(currentTurn) + "'S TURN";
+  turnIndicator.style.borderColor = currentTurn === TEAM_USER ? '#ff4d4d' : '#4d94ff'; turnIndicator.style.color = '';
+  if (DEMO.turns >= DEMO_CAP) { matchOver = true; showMatchEnd(); return; }
+  if (!DEMO.gotResult) demoShowResult(DEMO.plan && DEMO.plan.a.type === 'move' ? 'Moved into position.' : 'Done.');
+  DEMO.phase = 'result'; demoSchedule();
+};
+const _dShowOverlay = showOverlay;
+showOverlay = function (t, d) {
+  if (mode !== 'DEMO' || !DEMO) return _dShowOverlay(t, d);
+  if (t === 'GOAL!') {
+    const who = score.USER > DEMO.prev.USER ? 'RED' : 'BLUE'; DEMO.prev = { ...score };
+    _dShowOverlay('GOAL!', who + ' scored!'); overlayBtn.textContent = 'CONTINUE';
+    demoShowResult('⚽ GOAL for ' + who + '! The pitch resets and the other team kicks off.');
+    DEMO.phase = 'result'; clearTimeout(DEMO.timer);
+    if (DEMO.auto) DEMO.timer = setTimeout(() => { if (mode === 'DEMO' && overlay.style.display === 'flex') handleOverlayClick(); }, 2800);
+    return;
+  }
+  _dShowOverlay(t, d);
+};
+const _dShowEnd = showMatchEnd;
+showMatchEnd = function () {
+  if (mode !== 'DEMO' || !DEMO) return _dShowEnd();
+  clearTimeout(DEMO.timer); DEMO.phase = 'over';
+  const t = score.USER === score.CPU ? "IT'S A DRAW" : (score.USER > score.CPU ? 'RED WINS' : 'BLUE WINS');
+  _dShowOverlay('LESSON COMPLETE', t + ' · ' + score.USER + '–' + score.CPU);
+  overlayBtn.textContent = 'FINISH'; overlayBtn.style.display = '';
+  demoShowResult('That was a full match! Now try it yourself against the CPU.');
+};
+const _dOverlayClick = handleOverlayClick;
+handleOverlayClick = function () {
+  if (mode === 'DEMO' && DEMO && DEMO.phase === 'over') { demoExit(); return; }
+  return _dOverlayClick();
+};
+const _dLeave = leaveGame;
+leaveGame = function () { if (mode === 'DEMO') { demoExit(); return; } return _dLeave(); };
+const _dUpdScore = updateScoreboard;
+updateScoreboard = function () {
+  if (mode === 'DEMO') { scoreP1Display.textContent = score.USER; scoreP2Display.textContent = score.CPU; return; }
+  _dUpdScore();
+};
+
+// highlight the planned move on the pitch
+function drawDemoPreview() {
+  const P = DEMO && DEMO.preview; if (!P || DEMO.phase !== 'preview') return;
+  const pc = pieces.find(p => p.id === P.id); if (!pc) return;
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+  ctx.save(); ctx.lineWidth = 3; ctx.setLineDash([]);
+  ctx.strokeStyle = '#ffe600'; ctx.beginPath(); ctx.arc(pc.x, pc.y, PieceRadius + 9 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([7, 6]);
+  if (P.type === 'move') {
+    const r = resolveMovementWithCollisions(pc, P.tx, P.ty);
+    ctx.strokeStyle = '#00ffff'; ctx.beginPath(); ctx.moveTo(pc.x, pc.y); ctx.lineTo(r.finalX, r.finalY); ctx.stroke();
+    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(r.finalX, r.finalY, PieceRadius, 0, Math.PI * 2); ctx.stroke();
+  } else if (P.type === 'pass') {
+    const rc = pieces.find(p => p.id === P.to);
+    if (rc) {
+      ctx.strokeStyle = '#ffcc00'; ctx.beginPath(); ctx.moveTo(pc.x, pc.y); ctx.lineTo(rc.x, rc.y); ctx.stroke();
+      ctx.setLineDash([]); ctx.strokeStyle = '#2ecc71'; ctx.beginPath(); ctx.arc(rc.x, rc.y, PieceRadius + 9 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+    }
+  } else {
+    const t = getShotTarget(pc.team, P.zone);
+    ctx.strokeStyle = '#ff0055'; ctx.beginPath(); ctx.moveTo(pc.x, pc.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(t.x, t.y, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.font = 'bold 18px sans-serif'; ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+    const txt = Math.round(goalChance(pc, t) * 100) + '%', mx = (pc.x + t.x) / 2 + 8, my = (pc.y + t.y) / 2 - 8;
+    ctx.strokeText(txt, mx, my); ctx.fillText(txt, mx, my);
+  }
+  ctx.restore();
+}
+const _dRender = render;
+render = function () { _dRender(); if (mode === 'DEMO') drawDemoPreview(); };
+
+// ---------- lobby card ----------
+(function () {
+  const html = '<button id="demo-card" class="mode-card" onclick="demoStart()"><span class="mode-ico">🎓</span><span class="mode-txt"><b>LEARN TO PLAY</b><small>Watch two AIs play, every move explained</small></span><span class="chev">›</span></button>';
+  const anchor = document.getElementById('wt-card') || document.getElementById('wc-card');
+  if (anchor) anchor.insertAdjacentHTML('afterend', html); else document.querySelector('.modes').insertAdjacentHTML('afterbegin', html);
+})();
+</script>
 </body>
 </html>
