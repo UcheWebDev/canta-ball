@@ -5795,5 +5795,218 @@ render = function () { _dRender(); if (mode === 'DEMO') drawDemoPreview(); };
   if (anchor) anchor.insertAdjacentHTML('afterend', html); else document.querySelector('.modes').insertAdjacentHTML('afterbegin', html);
 })();
 </script>
+<!-- PASTE this block at the very end of your file, right BEFORE the final </body> (after the learn block) -->
+<style>
+#tu-panel { display: none; width: 100%; margin-top: 8px; background: #111; border: 2px solid #4d94ff; border-radius: 6px; padding: 10px; text-align: left; }
+.tu-head { display: flex; justify-content: space-between; font-size: 11px; color: #9ab; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+#tu-title { color: #ffcc00; font-weight: bold; font-size: 15px; margin-bottom: 6px; }
+#tu-say { font-size: 13px; color: #eee; line-height: 1.55; margin-bottom: 6px; }
+#tu-hint { font-size: 11.5px; color: #9ab; margin-bottom: 6px; line-height: 1.45; }
+#tu-status { display: none; font-size: 12.5px; padding: 6px 8px; border-radius: 4px; line-height: 1.5; margin-bottom: 6px; }
+#tu-status.good { display: block; color: #b8ffcf; background: rgba(46,204,113,.15); border-left: 3px solid #2ecc71; }
+#tu-status.bad { display: block; color: #ffd9a8; background: rgba(255,153,0,.15); border-left: 3px solid #ff9900; }
+.tu-ctl { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tu-ctl button { flex: 1 1 22%; min-height: 44px; font-size: 12px; font-weight: bold; color: #111; background: #ffcc00; border: 2px solid #ffe600; border-radius: 8px; cursor: pointer; }
+.tu-ctl button.alt { background: #222; color: #ffcc00; border-color: #444; }
+.tu-ctl button:disabled { opacity: .35; cursor: not-allowed; }
+</style>
+
+<script>
+/* ===== CANTABALL TUTORIAL: you play RED through 7 short coached lessons =====
+   Each lesson sets up a scenario on the real pitch, tells you what to do, highlights where to look,
+   then checks what you did (right = next lesson, wrong = it explains why and resets the scenario).
+   BLUE never moves, so nothing can go wrong. Stats / coins / saved games are not touched. */
+let TU = null;
+const tuEl = id => document.getElementById(id);
+const tuPc = id => pieces.find(p => p.id === id);
+const tuTp = (u, v) => isPortrait ? { x: 275 + v * 275, y: 1000 - u * 1000 } : { x: u * 1000, y: 275 + v * 275 };   // u: 0 own goal -> 1 enemy goal, v: sideways
+function tuPlace(id, u, v, dir) {
+  const p = tuPc(id), t = tuTp(u, v); if (!p) return;
+  p.x = t.x; p.y = t.y; p.angle = (isPortrait ? -Math.PI / 2 : 0) + (dir || 0);
+}
+function tuBall(id) { const p = tuPc(id); ball.carrier = p; ball.x = p.x; ball.y = p.y; }
+function tuLoose(u, v) { const t = tuTp(u, v); ball.carrier = null; ball.x = t.x; ball.y = t.y; }
+function tuPark() {       // BLUE stands still in a line near their own goal
+  [[6, -.8], [7, -.4], [8, 0], [9, .4], [10, .8]].forEach(a => tuPlace(a[0], .86, a[1], Math.PI));
+  tuPlace(12, .96, 0, Math.PI);
+}
+const tuDone = m => ({ ok: true, msg: m }), tuFail = m => ({ ok: false, msg: m });
+const tuMsg = (ev, re) => ev.msgs.some(m => re.test(m));
+
+const TU_LESSONS = [
+  { t: 'Move a player', say: '1) Tap one of your <b>RED</b> players (ringed in blue).<br>2) Tap anywhere on the pitch inside the dashed circle to run there.',
+    hint: 'Each turn you get ONE action. Running uses your whole turn, and the player turns to face the way he ran.',
+    setup() { tuPark(); }, focus: () => [tuPc(4), tuPc(5)],
+    check(ev) { return ev.type === 'move' ? tuDone('Nice run! After your action the turn passes to the other team (BLUE waits in this lesson).') : tuFail('Tap a player, then tap the pitch to MOVE.'); } },
+  { t: 'Pick up the ball', say: 'The ball is loose. Tap your ringed player, then tap <b>on the ball</b> to run onto it and pick it up.',
+    hint: 'A player picks the ball up when he finishes his run right next to it.',
+    setup() { tuPark(); tuPlace(4, .28, .1, 0); tuLoose(.36, .1); }, focus: () => [tuPc(4), { x: ball.x, y: ball.y }],
+    check(ev) { return ev.carrier && ev.carrier.team === TEAM_USER ? tuDone('You have the ball! The little white ball now sticks to your player.') : tuFail('You need to finish right next to the ball - tap the ball itself.'); } },
+  { t: 'Pass to a teammate', say: '1) Tap the player with the ball.<br>2) Press <b>PASS</b>.<br>3) Tap the ringed teammate. A glowing circle shows who you can pass to.',
+    hint: 'Only the ball carrier can pass. If an opponent stands near the pass line he may intercept - here the way is clear.',
+    setup() { tuPark(); tuPlace(4, .38, 0, 0); tuBall(4); tuPlace(5, .62, -.5, 0); }, focus: () => [tuPc(4), tuPc(5)],
+    check(ev) { return ev.type === 'pass' && tuMsg(ev, /Pass Complete/i) ? tuDone('Pass complete! Keeping the ball by passing is how you break the defence down.') : tuFail('Tap the player with the ball, press PASS, then tap your teammate.'); } },
+  { t: 'Offside', say: 'You have the ball. Two teammates are free to receive it. Tap your carrier, press <b>PASS</b> and watch the <b>purple line</b> - then pass to the one who is <b>NOT offside</b>.',
+    hint: 'A player in the opponent half who is past the second-last defender (the keeper counts) is offside. Purple marker = offside.',
+    setup() {
+      tuPlace(4, .52, 0, 0); tuBall(4); tuPlace(3, .64, .4, 0); tuPlace(5, .88, -.5, 0);
+      tuPlace(6, .80, 0, Math.PI); tuPlace(7, .74, -.35, Math.PI); tuPlace(8, .70, -.8, Math.PI); tuPlace(9, .70, .8, Math.PI); tuPlace(10, .60, -.55, Math.PI); tuPlace(12, .96, 0, Math.PI);
+    }, focus: () => [tuPc(4)],
+    check(ev) {
+      if (tuMsg(ev, /OFFSIDE/i)) return tuFail('That was OFFSIDE - your teammate was past the second-last defender (the purple line), so BLUE got a free kick.');
+      return ev.type === 'pass' && tuMsg(ev, /Pass Complete/i) ? tuDone('Correct! He stayed behind the offside line, so the pass was legal.') : tuFail('Press PASS with the carrier and tap the teammate who is not offside.');
+    } },
+  { t: 'Score a goal', say: 'You are in front of goal. The keeper stands near one side.<br>1) Tap your carrier, press <b>SHOOT</b>.<br>2) Pick <b>LEFT / CENTER / RIGHT</b> and read the <b>%</b> on the aiming line.<br>3) Choose the side <b>away from the keeper</b>, then press <b>TAKE SHOT</b>.',
+    hint: 'A keeper close to the shot line saves most shots. Far from the line he cannot reach it. Longer shots are also less accurate.',
+    setup() {
+      tuPlace(6, .55, -.85, Math.PI); tuPlace(7, .55, .85, Math.PI); tuPlace(8, .40, -.85, Math.PI); tuPlace(9, .40, .85, Math.PI); tuPlace(10, .30, 0, Math.PI);
+      tuPlace(5, .74, -.05, 0); tuBall(5); tuPlace(12, .96, .09, Math.PI);
+    }, focus: () => [tuPc(5), tuPc(12)],
+    check(ev) {
+      if (ev.goal) return tuDone('GOAL! You aimed away from the keeper, so he could not reach it.');
+      if (tuMsg(ev, /SAVED/i)) return tuFail('Saved! The keeper was close to that line. Choose the side away from him - watch the % change.');
+      if (tuMsg(ev, /OFF TARGET/i)) return tuFail('Off target - long or awkward shots can miss. Check the % before you shoot.');
+      return tuFail('Tap the carrier, press SHOOT, choose a side, then press TAKE SHOT.');
+    } },
+  { t: 'Win the ball (tackle)', say: 'BLUE has the ball and is facing you. Tap your ringed player and run <b>straight at the BLUE carrier</b> - you must hit him from the <b>front</b>.',
+    hint: 'The faint white wedge in front of him is the legal tackle zone. Side or back tackles are fouls. After you win it, your player turns away from him automatically.',
+    setup() { tuPark(); tuPlace(8, .50, 0, Math.PI); tuBall(8); tuPlace(4, .38, 0, 0); tuPlace(2, .52, -.5, 0); }, focus: () => [tuPc(4), tuPc(8)],
+    check(ev) {
+      if (tuMsg(ev, /Clean Tackle/i)) return tuDone('Clean tackle! You won the ball from the front. Your player is now turned away from him so he cannot tackle straight back.');
+      if (tuMsg(ev, /FOUL/i)) return tuFail('That was a FOUL - you hit him from the side or back. Approach from the front, inside the white wedge.');
+      return tuFail('Run your ringed player straight into the BLUE ball carrier from the front.');
+    } },
+  { t: 'Goalkeeper', say: 'BLUE is about to shoot at your goal! Tap your <b>goalkeeper</b> (ringed) and move him onto the <b>straight line between the ball and your goal</b>.',
+    hint: 'Keepers can only move inside their penalty box, but inside it they can go anywhere. Standing on the shot line saves most shots.',
+    setup() { tuPark(); tuPlace(9, .30, .25, Math.PI); tuBall(9); },
+    focus: () => [tuPc(11), tuPc(9)],
+    check(ev) {
+      if (ev.type !== 'move' || ev.pieceId !== 11) return tuFail('Tap your goalkeeper (the one in your box) and move him.');
+      const k = tuPc(11), c = tuPc(9), d = distToSegment(k, c, getShotTarget(TEAM_CPU, 'CENTER'));
+      return d <= 28 ? tuDone('Perfect - the keeper covers the shot line, so a shot there would almost always be saved.') : tuFail('Not quite on the line yet. Aim for the straight line from the BLUE ball to the middle of your goal.');
+    } }
+];
+
+document.getElementById('canvas-container').insertAdjacentHTML('afterend',
+  '<div id="tu-panel"><div class="tu-head"><span id="tu-step"></span><span>Tutorial</span></div><div id="tu-title"></div><div id="tu-say"></div><div id="tu-hint"></div><div id="tu-status"></div>' +
+  '<div class="tu-ctl"><button id="tu-next" onclick="tutorNext()" disabled>NEXT ▶</button><button class="alt" onclick="tutorSetup()">↻ RESET</button><button class="alt" onclick="tutorSkip()">SKIP ⏭</button><button class="alt" onclick="tutorExit()">✕ EXIT</button></div></div>');
+
+function tuStatus(kind, msg) { const s = tuEl('tu-status'); s.className = kind || ''; s.textContent = msg || ''; if (!kind) s.style.display = 'none'; }
+
+function tutorStart() {
+  if (!inLobby) return;
+  mode = 'TUTOR'; myTeam = TEAM_USER; phase = 'PLAY'; inLobby = false; matchOver = false; timeUp = false;
+  matchSetups = { USER: normSetup(null), CPU: normSetup(null) };
+  TU = { i: 0, state: 'ask', last: null };
+  lobbyFrame.style.display = 'none'; tableFrame.style.display = 'flex';
+  tuEl('demo-panel') && (tuEl('demo-panel').style.display = 'none');
+  tuEl('tu-panel').style.display = 'block'; tuEl('action-bar').style.display = '';
+  tuEl('leave-link').textContent = '← Exit tutorial'; presenceDot.style.display = 'none';
+  overlay.style.display = 'none';
+  labelP1.textContent = 'YOU (RED)'; labelP2.textContent = 'BLUE'; labelP1.style.color = '#ff4d4d'; labelP2.style.color = '#4d94ff';
+  matchTimerEl.textContent = 'TUTORIAL'; matchTimerEl.classList.remove('low');
+  tutorSetup();
+}
+
+function tutorSetup() {
+  if (mode !== 'TUTOR' || !TU) return;
+  const L = TU_LESSONS[TU.i]; TU.state = 'ask'; TU.last = null;
+  isAnimating = false; matchOver = false; score = { USER: 0, CPU: 0 }; selectedPiece = null; selectedAction = null; pointerPos = null;
+  updateCanvasOrientation(); initTeams(); resizeCanvasDisplay();
+  currentTurn = TEAM_USER; L.setup();
+  updateScoreboard(); updateActionButtons();
+  turnIndicator.textContent = 'YOUR TURN'; turnIndicator.style.borderColor = '#ff4d4d'; turnIndicator.style.color = '';
+  tuEl('tu-step').textContent = 'Lesson ' + (TU.i + 1) + ' / ' + TU_LESSONS.length;
+  tuEl('tu-title').textContent = L.t; tuEl('tu-say').innerHTML = L.say; tuEl('tu-hint').textContent = '💡 ' + L.hint;
+  tuStatus(''); tuEl('tu-next').disabled = true; tuEl('tu-next').textContent = 'NEXT ▶';
+}
+
+function tutorEval(ev) {
+  if (!TU || TU.state !== 'ask') return;
+  const r = TU_LESSONS[TU.i].check(ev);
+  if (r.ok) {
+    TU.state = 'done'; tuStatus('good', '✅ ' + r.msg);
+    tuEl('tu-next').disabled = false; tuEl('tu-next').textContent = TU.i === TU_LESSONS.length - 1 ? 'FINISH 🎉' : 'NEXT ▶';
+  } else {
+    TU.state = 'retry'; tuStatus('bad', '⚠ ' + r.msg + ' Let\'s set it up again…');
+    setTimeout(() => { if (mode === 'TUTOR' && TU && TU.state === 'retry') tutorSetup(); }, 3200);
+  }
+}
+function tutorNext() {
+  if (!TU || TU.state !== 'done') return;
+  if (TU.i >= TU_LESSONS.length - 1) {
+    TU.state = 'end';
+    tuEl('tu-step').textContent = 'Complete'; tuEl('tu-title').textContent = '🎉 Tutorial complete!';
+    tuEl('tu-say').textContent = 'You now know how to move, pass, avoid offside, shoot, tackle and use your goalkeeper. Time to play a real match!';
+    tuEl('tu-hint').textContent = ''; tuStatus('good', 'Tip: turn on ⭐ star player in match setup to shoot from anywhere.');
+    tuEl('tu-next').textContent = 'PLAY VS CPU'; tuEl('tu-next').disabled = false; tuEl('tu-next').onclick = () => { tutorExit(); startVsCpu(); };
+    return;
+  }
+  TU.i++; tutorSetup();
+}
+function tutorSkip() { if (!TU || TU.state === 'end') return; if (TU.i < TU_LESSONS.length - 1) { TU.i++; tutorSetup(); } else { TU.state = 'done'; tutorNext(); } }
+function tutorExit() {
+  if (mode !== 'TUTOR') return;
+  TU = null; overlay.style.display = 'none'; isAnimating = false;
+  tuEl('tu-panel').style.display = 'none'; tuEl('tu-next').onclick = tutorNext; tuEl('leave-link').textContent = 'Leave Game';
+  returnToLobby(); myTeam = TEAM_USER;
+}
+
+// ---------- hooks ----------
+['handleMoveAction', 'handlePassAction', 'handleShootAction'].forEach(name => {
+  const orig = window[name], kind = name === 'handleMoveAction' ? 'move' : name === 'handlePassAction' ? 'pass' : 'shoot';
+  window[name] = function (piece, a, b) {
+    if (mode === 'TUTOR' && TU) TU.last = { type: kind, pieceId: piece.id, to: kind === 'pass' ? a.id : null, msgs: [], goal: false };
+    return orig.apply(this, arguments);
+  };
+});
+const _tuLog = logAndToast;
+logAndToast = function (msg, type) { if (mode === 'TUTOR' && TU && TU.last && msg) TU.last.msgs.push(msg); return _tuLog(msg, type); };
+
+const _tuSwitch = switchTurn;
+switchTurn = function (n) {
+  if (mode !== 'TUTOR' || !TU) return _tuSwitch(n);
+  const ev = TU.last || { type: 'none', msgs: [] };
+  _tuSwitch(n);
+  currentTurn = TEAM_USER;                                   // BLUE never takes a turn in the tutorial
+  turnIndicator.textContent = 'YOUR TURN'; turnIndicator.style.borderColor = '#ff4d4d'; turnIndicator.style.color = '';
+  const c = ball.carrier; ev.carrier = c ? { team: c.team, id: c.id } : null; TU.last = null;
+  tutorEval(ev);
+};
+const _tuOverlay = showOverlay;
+showOverlay = function (t, d) {
+  if (mode !== 'TUTOR' || !TU) return _tuOverlay(t, d);
+  if (t === 'GOAL!') {                                       // no goal screen: the lesson box reports it
+    const ev = TU.last || { type: 'shoot', msgs: [] }; ev.goal = true; ev.carrier = null; TU.last = null;
+    selectedPiece = null; selectedAction = null; updateActionButtons(); tutorEval(ev);
+  }
+};
+const _tuPointer = handlePointerInput;
+handlePointerInput = function (e) { if (mode === 'TUTOR' && (!TU || TU.state !== 'ask')) return; return _tuPointer(e); };
+const _tuTickClock = tickClock;
+tickClock = function () { if (mode === 'TUTOR') { clockLast = Date.now(); return; } _tuTickClock(); };
+const _tuTickTurn = tickTurnClock;
+tickTurnClock = function () { if (mode === 'TUTOR') return; _tuTickTurn(); };
+const _tuLeave = leaveGame;
+leaveGame = function () { if (mode === 'TUTOR') { tutorExit(); return; } return _tuLeave(); };
+
+// pulsing rings show where to look
+const _tuRender = render;
+render = function () {
+  _tuRender();
+  if (mode !== 'TUTOR' || !TU || TU.state !== 'ask' || isAnimating || selectedPiece) return;
+  const pts = TU_LESSONS[TU.i].focus(), pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220);
+  ctx.save(); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(77,200,255,0.95)';
+  pts.forEach(p => { if (p) { ctx.beginPath(); ctx.arc(p.x, p.y, PieceRadius + 10 + pulse * 4, 0, Math.PI * 2); ctx.stroke(); } });
+  ctx.restore();
+};
+
+// lobby card
+(function () {
+  const html = '<button id="tu-card" class="mode-card" onclick="tutorStart()"><span class="mode-ico">🧑‍🏫</span><span class="mode-txt"><b>TUTORIAL</b><small>Learn by doing - 7 short guided lessons</small></span><span class="chev">›</span></button>';
+  const anchor = document.getElementById('demo-card') || document.getElementById('wt-card') || document.getElementById('wc-card');
+  if (anchor) anchor.insertAdjacentHTML('afterend', html); else document.querySelector('.modes').insertAdjacentHTML('afterbegin', html);
+})();
+</script>
 </body>
 </html>
