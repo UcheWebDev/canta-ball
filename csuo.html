@@ -5159,5 +5159,35 @@ window.addEventListener('beforeunload', () => { if (V.on) vSend({ t: 'bye' }); }
     if (ul) ul.insertAdjacentHTML('beforeend', '<li><b>Voice chat:</b> in an online match tap <b>🎤 VOICE</b> (bottom-left) and allow the microphone. Talk starts when both players have turned it on. Use <b>MUTE</b> to silence yourself.</li>');
 })();
 </script>
+<!-- PASTE this block right AFTER the voice chat <script> block and BEFORE </body> -->
+<script>
+/* ===== CANTABALL VOICE: TURN relay so voice works when networks block direct connections ===== */
+const METERED_APP = 'cantaball-game';   // e.g. 'cantaball'  ->  https://cantaball.metered.live
+const METERED_KEY = '35d941a6d76f38c5e33f94f0c8b29a0c7fc2';    // from your Metered dashboard
+const FORCE_RELAY = false;             // set true to test: forces ALL audio through TURN
+
+let turnLoaded = false;
+async function loadTurn() {
+    if (turnLoaded || METERED_APP.startsWith('YOUR_')) return;
+    try {
+        const r = await fetch('https://' + METERED_APP + '.metered.live/api/v1/turn/credentials?apiKey=' + METERED_KEY);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const servers = await r.json();                       // array of {urls, username, credential}
+        VOICE_ICE.iceServers = [{ urls: 'stun:stun.l.google.com:19302' }].concat(servers);
+        if (FORCE_RELAY) VOICE_ICE.iceTransportPolicy = 'relay';
+        turnLoaded = true;
+    } catch (e) {
+        console.warn('TURN credentials failed', e);
+        showToast('Voice relay unavailable - check METERED_APP / METERED_KEY', 'bad');
+    }
+}
+
+// Fetch relay credentials before the first voice connection is created.
+const _voiceStartNoTurn = voiceStart;
+voiceStart = async function () {
+    await loadTurn();
+    return _voiceStartNoTurn();
+};
+</script>
 </body>
 </html>
