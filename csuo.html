@@ -5023,5 +5023,141 @@ wcUpdateCard();
   if (ul) ul.insertAdjacentHTML('beforeend', '<li><b>World Cup:</b> pick a nation and win four knockout rounds. Drawn matches go to golden-goal extra time, then penalties. The CPU gets sharper every round. Leaving a match forfeits it.</li>');
 })();
 </script>
+<!-- PASTE this block at the very end of your file, right BEFORE the final </body> -->
+<style>
+#voice-bar { position: fixed; left: 10px; bottom: 10px; z-index: 960; display: none; gap: 6px; align-items: center; flex-wrap: wrap; max-width: calc(100vw - 20px); }
+.vbtn { min-height: 44px; padding: 0 14px; border-radius: 22px; border: 2px solid #444; background: #1a1a1a; color: #ffcc00; font-weight: bold; font-size: 13px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.vbtn.on { background: #2ecc71; border-color: #2ecc71; color: #111; }
+.vbtn.muted { background: #ff4d4d; border-color: #ff4d4d; color: #fff; }
+#voice-status { font-size: 11px; color: #ddd; background: rgba(0,0,0,.75); padding: 5px 9px; border-radius: 10px; }
+</style>
+
+<script>
+/* ===== CANTABALL VOICE CHAT: WebRTC audio between the two online players =====
+   Signalling (offer / answer / ICE) goes over a Supabase Realtime broadcast channel,
+   so no extra server or table is needed. The audio itself is peer-to-peer.
+   Player A (USER) makes the offer, player B (CPU side) answers. */
+const VOICE_ICE = { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+    // For networks that block direct connections (many mobile carriers) add a TURN server:
+    // , { urls: 'turn:YOUR_TURN_HOST:3478', username: 'USER', credential: 'PASS' }
+] };
+const V = { on: false, muted: false, stream: null, pc: null, ch: null, queue: [], lastOffer: 0 };
+
+document.body.insertAdjacentHTML('beforeend',
+    '<audio id="voice-audio" autoplay playsinline></audio>' +
+    '<div id="voice-bar"><button id="voice-btn" class="vbtn" onclick="voiceToggle()">🎤 VOICE</button>' +
+    '<button id="voice-mute" class="vbtn" style="display:none" onclick="voiceMute()">MUTE</button>' +
+    '<span id="voice-status" style="display:none"></span></div>');
+const vAudio = document.getElementById('voice-audio'), vBtn = document.getElementById('voice-btn'),
+      vMute = document.getElementById('voice-mute'), vStat = document.getElementById('voice-status'),
+      vBar = document.getElementById('voice-bar');
+
+function vStatus(t) { vStat.textContent = t; vStat.style.display = t ? 'inline-block' : 'none'; }
+function vUi() {
+    vBtn.classList.toggle('on', V.on);
+    vBtn.textContent = V.on ? '🎤 VOICE ON' : '🎤 VOICE';
+    vMute.style.display = V.on ? 'inline-block' : 'none';
+    vMute.classList.toggle('muted', V.muted);
+    vMute.textContent = V.muted ? '🔇 UNMUTE' : 'MUTE';
+}
+function vSend(p) { if (V.ch) V.ch.send({ type: 'broadcast', event: 'sig', payload: Object.assign({ from: myToken }, p) }); }
+
+function vMakePc() {
+    if (V.pc) { try { V.pc.close(); } catch (e) {} }
+    V.queue = [];
+    const pc = new RTCPeerConnection(VOICE_ICE);
+    V.pc = pc;
+    V.stream.getTracks().forEach(t => pc.addTrack(t, V.stream));
+    pc.onicecandidate = e => { if (e.candidate) vSend({ t: 'ice', c: e.candidate }); };
+    pc.ontrack = e => { vAudio.srcObject = e.streams[0]; vAudio.play().catch(() => {}); };
+    pc.onconnectionstatechange = () => {
+        if (pc !== V.pc) return;
+        const s = pc.connectionState;
+        vStatus(s === 'connected' ? 'Talking with ' + oppName()
+              : s === 'failed' ? 'Voice failed - your networks block it (a TURN server is needed)'
+              : 'Connecting…');
+    };
+    return pc;
+}
+function vFlush() { V.queue.splice(0).forEach(c => V.pc.addIceCandidate(c).catch(() => {})); }
+
+async function vSig(m) {
+    if (!V.on || !m || m.from === myToken) return;
+    try {
+        if (m.t === 'hello') {
+            if (!m.reply) vSend({ t: 'hello', reply: true });
+            if (myTeam === TEAM_USER && Date.now() - V.lastOffer > 4000 && !(V.pc && V.pc.connectionState === 'connected')) {
+                V.lastOffer = Date.now();
+                const pc = vMakePc();
+                await pc.setLocalDescription(await pc.createOffer());
+                vSend({ t: 'offer', sdp: pc.localDescription });
+            }
+        } else if (m.t === 'offer' && myTeam !== TEAM_USER) {
+            const pc = vMakePc();
+            await pc.setRemoteDescription(m.sdp);
+            vFlush();
+            await pc.setLocalDescription(await pc.createAnswer());
+            vSend({ t: 'answer', sdp: pc.localDescription });
+        } else if (m.t === 'answer' && myTeam === TEAM_USER && V.pc && V.pc.signalingState === 'have-local-offer') {
+            await V.pc.setRemoteDescription(m.sdp);
+            vFlush();
+        } else if (m.t === 'ice') {
+            if (V.pc && V.pc.remoteDescription) await V.pc.addIceCandidate(m.c).catch(() => {});
+            else V.queue.push(m.c);
+        } else if (m.t === 'bye') {
+            vStatus(oppName() + ' left voice');
+        }
+    } catch (e) { console.warn('voice signalling error', e); }
+}
+
+async function voiceStart() {
+    if (V.on || !sb || mode !== 'ONLINE' || !gameRowId) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { showToast('Voice needs HTTPS and a supported browser', 'bad'); return; }
+    try {
+        V.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (e) { showToast('Microphone blocked - allow it in your browser settings', 'bad'); return; }
+    V.on = true; V.muted = false; V.lastOffer = 0;
+    vMakePc();
+    V.ch = sb.channel('voice-' + gameRowId, { config: { broadcast: { self: false } } });
+    V.ch.on('broadcast', { event: 'sig' }, ({ payload }) => vSig(payload))
+        .subscribe(st => { if (st === 'SUBSCRIBED') vSend({ t: 'hello' }); });
+    vStatus('Waiting for ' + oppName() + ' to turn voice on…');
+    vUi();
+}
+
+function voiceStop() {
+    if (!V.on) return;
+    vSend({ t: 'bye' });
+    V.on = false;
+    try { if (V.pc) V.pc.close(); } catch (e) {}
+    if (V.stream) V.stream.getTracks().forEach(t => t.stop());
+    if (V.ch && sb) sb.removeChannel(V.ch);
+    V.pc = null; V.stream = null; V.ch = null; V.queue = [];
+    vAudio.srcObject = null;
+    vStatus(''); vUi();
+}
+function voiceToggle() { V.on ? voiceStop() : voiceStart(); }
+function voiceMute() {
+    if (!V.on || !V.stream) return;
+    V.muted = !V.muted;
+    V.stream.getAudioTracks().forEach(t => { t.enabled = !V.muted; });
+    vUi();
+}
+
+// Show the voice bar only in an online match; shut voice down when leaving it.
+setInterval(() => {
+    const online = mode === 'ONLINE' && !inLobby && !!gameRowId;
+    vBar.style.display = online ? 'flex' : 'none';
+    if (!online && V.on) voiceStop();
+}, 500);
+window.addEventListener('beforeunload', () => { if (V.on) vSend({ t: 'bye' }); });
+
+(function () {
+    const ul = document.querySelector('.howto ul');
+    if (ul) ul.insertAdjacentHTML('beforeend', '<li><b>Voice chat:</b> in an online match tap <b>🎤 VOICE</b> (bottom-left) and allow the microphone. Talk starts when both players have turned it on. Use <b>MUTE</b> to silence yourself.</li>');
+})();
+</script>
 </body>
 </html>
