@@ -5189,5 +5189,275 @@ voiceStart = async function () {
     return _voiceStartNoTurn();
 };
 </script>
+<!-- PASTE this block at the very end of your file, right BEFORE the final </body> (after the voice blocks) -->
+<style>
+#wt-overlay { position: fixed; inset: 0; z-index: 955; display: none; overflow-y: auto; padding: 12px;
+  background: radial-gradient(ellipse at 50% -10%, rgba(77,148,255,.22), transparent 55%), #0b0d12; }
+.wt-box { width: 100%; max-width: 520px; margin: 0 auto; background: rgba(21,23,29,.96); border: 1px solid #2c2f38; border-radius: 16px; padding: 14px; text-align: center; }
+.wt-box h2 { margin: 0 0 4px; color: #ffcc00; letter-spacing: 3px; font-size: 20px; }
+.wt-sub { font-size: 12px; color: #aaa; margin: 0 0 12px; }
+.wt-row { display: flex; align-items: center; gap: 10px; padding: 10px; margin-bottom: 8px; background: #1d2027; border: 1px solid #2c2f38; border-radius: 12px; text-align: left; }
+.wt-main { flex: 1; min-width: 0; }
+.wt-main b { display: block; font-size: 14px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wt-main small { color: #999; font-size: 11px; }
+.wt-score { color: #ffcc00; font-family: 'Courier New', monospace; font-weight: bold; margin: 0 4px; }
+.wt-go { padding: 10px 14px; border-radius: 10px; border: 2px solid #ffe600; background: #ffcc00; color: #111; font-weight: bold; font-size: 12px; cursor: pointer; }
+.wt-empty { color: #888; font-size: 13px; padding: 22px 8px; line-height: 1.6; }
+</style>
+
+<script>
+/* ===== CANTABALL WATCH MATCH: spectate any live match (player vs player, vs CPU, World Cup) =====
+   * Players broadcast their settled game state on a Supabase Realtime channel "watch-<matchId>"
+     (only while someone is watching) and advertise the match in a shared presence channel "watch-lobby".
+   * No tables / SQL needed. Spectators only ever read, they can't affect the game. */
+const WT = { key: uuid(), lobby: null, lobbyReady: false, listed: false, viewing: false,
+  id: null, key2: '', mch: null, mchReady: false, specs: 0, hash: '', sentAt: 0, metaStr: '', metaAt: 0, startT: 0, fin: false,
+  vch: null, first: true, animating: false, pending: null, lastHash: '', names: null, setup: false };
+
+// ---------- shared helpers ----------
+function wtHash(s) {
+    return JSON.stringify([s.pieces.map(p => [p.id, Math.round(p.x), Math.round(p.y), Math.round((p.angle || 0) * 20), p.role]),
+        Math.round(s.ball.x), Math.round(s.ball.y), s.ball.carrierId, s.score, s.currentTurn, s.matchOver, s.phase, s.lastEvent && s.lastEvent.id]);
+}
+function ensureLobby() {
+    if (WT.lobby || !sb) return;
+    WT.lobby = sb.channel('watch-lobby', { config: { presence: { key: WT.key } } });
+    WT.lobby.on('presence', { event: 'sync' }, () => { if (WT.viewing) wtRenderList(); })
+        .subscribe(st => { if (st === 'SUBSCRIBED') { WT.lobbyReady = true; WT.metaStr = ''; if (WT.viewing) wtRenderList(); } });
+}
+function maybeLeaveLobby() {
+    if (WT.lobby && !WT.id && !WT.viewing && mode !== 'SPECTATE') { sb.removeChannel(WT.lobby); WT.lobby = null; WT.lobbyReady = false; WT.listed = false; }
+}
+
+// ---------- BROADCASTING (runs on the players' devices) ----------
+function wtLive() { return !!sb && !inLobby && phase !== 'WATCH' && (mode === 'CPU' || (mode === 'ONLINE' && !!gameRowId)); }
+
+function wtOpenMatchCh() {
+    const ch = sb.channel('watch-' + WT.id, { config: { broadcast: { self: false }, presence: { key: WT.key } } });
+    WT.mch = ch; WT.mchReady = false;
+    ch.on('presence', { event: 'sync' }, () => {
+        WT.specs = Object.values(ch.presenceState()).filter(ms => ms.some(m => m.spec)).length;
+    }).on('presence', { event: 'join' }, ({ newPresences }) => {
+        if (newPresences.some(m => m.spec)) WT.hash = '';          // new spectator: send the full state right away
+    }).subscribe(st => { if (st === 'SUBSCRIBED') WT.mchReady = true; });
+}
+function wtStopBroadcast() {
+    const ch = WT.mch;
+    if (ch) { try { ch.send({ type: 'broadcast', event: 'end', payload: {} }); } catch (e) {} setTimeout(() => sb.removeChannel(ch), 400); }
+    WT.mch = null; WT.mchReady = false; WT.specs = 0; WT.id = null; WT.metaStr = ''; WT.fin = false;
+    wtUnlist(); maybeLeaveLobby();
+}
+function wtUnlist() { if (WT.lobbyReady && WT.listed) { try { WT.lobby.untrack(); } catch (e) {} WT.listed = false; WT.metaStr = ''; } }
+
+function wtSend(force) {
+    if (!WT.mchReady || !WT.specs || (isAnimating && !force)) return;
+    const s = serializeState(), a = myTeam === TEAM_USER, l1 = labelP1.textContent, l2 = labelP2.textContent;
+    s.names = { p1: a ? l1 : l2, p2: a ? l2 : l1 };
+    s.kits = WC.kits || null;
+    const h = wtHash(s), now = Date.now();
+    if (!force && h === WT.hash && now - WT.sentAt < 4000) return;   // unchanged (a keep-alive goes out every 4s)
+    WT.hash = h; WT.sentAt = now;
+    WT.mch.send({ type: 'broadcast', event: 'st', payload: s });
+}
+
+function wtTick() {
+    if (!wtLive()) { if (WT.id) wtStopBroadcast(); return; }
+    const key = mode + '|' + gameRowId;
+    if (WT.id && WT.key2 !== key) wtStopBroadcast();
+    if (!WT.id) {
+        WT.id = mode === 'ONLINE' ? 'g' + gameRowId : 'c' + WT.key + Date.now().toString(36);
+        WT.key2 = key; WT.hash = ''; WT.fin = false; WT.startT = Date.now();
+        ensureLobby(); wtOpenMatchCh();
+    }
+    if (matchOver) {                                   // final result goes out once, then the room disappears from the list
+        if (!WT.fin) { WT.fin = true; wtSend(true); wtUnlist(); }
+        return;
+    }
+    WT.fin = false;
+    wtSend(false);
+    if (!WT.lobbyReady) return;
+    const a = myTeam === TEAM_USER, l1 = labelP1.textContent, l2 = labelP2.textContent;
+    const meta = { id: WT.id, kind: (mode === 'CPU' && WC.inMatch) ? 'WC' : mode, p1: a ? l1 : l2, p2: a ? l2 : l1,
+                   s1: score.USER, s2: score.CPU, n: WT.specs, t: WT.startT };
+    const ms = JSON.stringify(meta);
+    if (ms !== WT.metaStr && Date.now() - WT.metaAt > 1500) {
+        WT.metaStr = ms; WT.metaAt = Date.now(); WT.listed = true;
+        WT.lobby.track(meta).catch(() => {});
+    }
+}
+setInterval(wtTick, 300);
+
+// ---------- WATCH LIST SCREEN ----------
+document.body.insertAdjacentHTML('beforeend',
+    '<div id="wt-overlay"><div class="wt-box"><h2>👁 WATCH MATCH</h2><p class="wt-sub">Live matches you can join as a spectator</p>' +
+    '<div id="wt-list"></div><div class="cancel-link" style="color:#aaa" onclick="wtCloseList()">← Back to lobby</div></div></div>');
+
+function wtOpenList() {
+    document.getElementById('wt-overlay').style.display = 'block';
+    WT.viewing = true;
+    if (!sb) { wtRenderList(); return; }
+    ensureLobby(); wtRenderList();
+}
+function wtCloseList() { document.getElementById('wt-overlay').style.display = 'none'; WT.viewing = false; maybeLeaveLobby(); }
+
+function wtRenderList() {
+    const box = document.getElementById('wt-list');
+    box.textContent = '';
+    if (!sb) { box.innerHTML = '<div class="wt-empty">Watching needs the online (Supabase) connection.</div>'; return; }
+    const items = [], seen = {};
+    if (WT.lobby) Object.values(WT.lobby.presenceState()).forEach(ms => ms.forEach(m => { if (m && m.id && !seen[m.id]) { seen[m.id] = 1; items.push(m); } }));
+    items.sort((a, b) => (b.t || 0) - (a.t || 0));
+    if (!items.length) {
+        const d = document.createElement('div'); d.className = 'wt-empty';
+        d.textContent = WT.lobbyReady ? 'No live matches right now. Start one and others can watch you!' : 'Looking for live matches…';
+        box.appendChild(d); return;
+    }
+    const tag = { ONLINE: '🌐 Player vs Player', CPU: '🤖 Player vs CPU', WC: '🏆 World Cup' };
+    items.forEach(m => {
+        const row = document.createElement('div'); row.className = 'wt-row';
+        const main = document.createElement('div'); main.className = 'wt-main';
+        const b = document.createElement('b');
+        b.appendChild(document.createTextNode(String(m.p1 || '?')));
+        const sc = document.createElement('span'); sc.className = 'wt-score'; sc.textContent = ' ' + (m.s1 || 0) + '–' + (m.s2 || 0) + ' ';
+        b.appendChild(sc); b.appendChild(document.createTextNode(String(m.p2 || '?')));
+        const sm = document.createElement('small'); sm.textContent = (tag[m.kind] || 'Match') + ' · 👁 ' + (m.n || 0) + ' watching';
+        main.appendChild(b); main.appendChild(sm);
+        const go = document.createElement('button'); go.className = 'wt-go'; go.textContent = '▶ WATCH';
+        go.onclick = () => wtStart(m);
+        row.appendChild(main); row.appendChild(go); box.appendChild(row);
+    });
+}
+
+// ---------- SPECTATING ----------
+function wtStart(m) {
+    if (!sb || !m || !m.id) return;
+    wtCloseList();
+    mode = 'SPECTATE'; myTeam = 'SPEC'; phase = 'WATCH'; inLobby = false; matchOver = false; timeUp = false;
+    currentTurn = TEAM_USER; WT.first = true; WT.pending = null; WT.animating = false; WT.lastHash = ''; WT.names = null; WT.setup = false;
+    lobbyFrame.style.display = 'none'; tableFrame.style.display = 'flex';
+    document.getElementById('action-bar').style.display = 'none';
+    document.getElementById('leave-link').textContent = '← Stop watching';
+    presenceDot.style.display = 'none';
+    overlay.style.display = 'none';
+    updateCanvasOrientation(); initTeams(); resizeCanvasDisplay();
+    score = { USER: 0, CPU: 0 }; updateScoreboard();
+    labelP1.textContent = String(m.p1 || 'P1').toUpperCase(); labelP2.textContent = String(m.p2 || 'P2').toUpperCase();
+    labelP1.style.color = '#ff4d4d'; labelP2.style.color = '#4d94ff';
+    turnIndicator.textContent = 'CONNECTING…';
+    const ch = sb.channel('watch-' + m.id, { config: { broadcast: { self: false }, presence: { key: WT.key } } });
+    WT.vch = ch;
+    ch.on('broadcast', { event: 'st' }, ({ payload }) => wtOnState(payload))
+      .on('broadcast', { event: 'end' }, () => { if (mode === 'SPECTATE' && WT.vch === ch) { showToast('The match has ended', 'info'); wtLeave(); } })
+      .subscribe(st => { if (st === 'SUBSCRIBED') ch.track({ spec: 1 }); });
+    showToast('Watching ' + (m.p1 || '') + ' vs ' + (m.p2 || ''), 'info');
+}
+
+function wtLeave() {
+    if (mode !== 'SPECTATE') return;
+    const ch = WT.vch; WT.vch = null;
+    if (ch) { try { ch.untrack(); } catch (e) {} sb.removeChannel(ch); }
+    overlay.style.display = 'none'; overlayBtn.style.display = '';
+    WC.kits = null; isAnimating = false;
+    returnToLobby();
+    myTeam = TEAM_USER;
+    document.getElementById('action-bar').style.display = '';
+    document.getElementById('leave-link').textContent = 'Leave Game';
+    wtOpenList();
+}
+
+function wtOnState(s) {
+    if (mode !== 'SPECTATE' || !s || !s.pieces || !s.ball) return;
+    if (typeof s.clockMs === 'number') { clockMs = s.clockMs; matchTimerEl.textContent = formatClock(clockMs); }
+    if (s.names) WT.names = s.names;
+    WC.kits = s.kits || null;
+    const h = wtHash(s);
+    if (h === WT.lastHash) return;                        // duplicate (both players broadcast) or keep-alive
+    WT.lastHash = h;
+    if (WT.animating) { WT.pending = s; return; }
+    wtApply(s);
+}
+
+function wtApply(s) {
+    s = normalizeState(s);
+    const first = WT.first; WT.first = false;
+    const prev = first ? { ...s.score } : { ...score }, wasOver = matchOver;
+    score = { ...s.score }; matchOver = !!s.matchOver; timeUp = !!s.timeUp; currentTurn = s.currentTurn; WT.setup = s.phase === 'SETUP';
+    const byId = {}; s.pieces.forEach(q => { byId[q.id] = q; });
+    const same = pieces.length === s.pieces.length && pieces.every(p => byId[p.id]);
+    const done = () => {
+        ball.x = s.ball.x; ball.y = s.ball.y;
+        ball.carrier = s.ball.carrierId ? (pieces.find(p => p.id === s.ball.carrierId) || null) : null;
+        wtAfter(s, prev, wasOver, first);
+    };
+    if (first || !same) { pieces = s.pieces.map(q => new Piece(q.id, q.team, q.role, q.x, q.y, q.angle)); done(); return; }
+    pieces.forEach(p => { p.role = byId[p.id].role; p.team = byId[p.id].team; });
+    ball.carrier = null;
+    WT.animating = true; isAnimating = true;
+    animateRemoteUpdate(pieces, pieces.map(p => byId[p.id]), s.ball.x, s.ball.y, () => {
+        WT.animating = false; isAnimating = false;
+        done();
+        if (WT.pending && mode === 'SPECTATE') { const n = WT.pending; WT.pending = null; wtApply(n); }
+    });
+}
+
+function wtAfter(s, prev, wasOver, first) {
+    const n = WT.names || { p1: 'RED', p2: 'BLUE' };
+    labelP1.textContent = String(n.p1).toUpperCase(); labelP2.textContent = String(n.p2).toUpperCase();
+    const k = WC.kits;
+    labelP1.style.color = k && typeof wcReadable === 'function' ? wcReadable(k.USER.m) : '#ff4d4d';
+    labelP2.style.color = k && typeof wcReadable === 'function' ? wcReadable(k.CPU.m) : '#4d94ff';
+    updateScoreboard();
+    matchTimerEl.textContent = formatClock(clockMs);
+    turnIndicator.textContent = WT.setup ? 'SETTING UP…' : (matchOver ? 'FULL TIME' : String(currentTurn === TEAM_USER ? n.p1 : n.p2).toUpperCase() + "'S TURN");
+    turnIndicator.style.borderColor = currentTurn === TEAM_USER ? '#ff4d4d' : '#4d94ff';
+    turnIndicator.style.color = '';
+    const ev = s.lastEvent;
+    if (ev && ev.id && ev.id !== lastShownEventId) { lastShownEventId = ev.id; if (!first) showToast(ev.msg, ev.type); }
+    if (wasOver && !matchOver) overlay.style.display = 'none';
+    if (!wasOver && !first) {
+        if (matchOver) {
+            showOverlay(timeUp ? 'FULL TIME' : 'GAME OVER', n.p1 + ' ' + score.USER + '–' + score.CPU + ' ' + n.p2);
+            overlayBtn.style.display = ''; overlayBtn.textContent = 'BACK TO LIST';
+        } else if (score.USER > prev.USER || score.CPU > prev.CPU) {
+            showOverlay('GOAL!', (score.USER > prev.USER ? n.p1 : n.p2) + ' scored!');
+            overlayBtn.style.display = 'none';
+            setTimeout(() => { if (mode === 'SPECTATE' && !matchOver) overlay.style.display = 'none'; }, 2200);
+        }
+    } else if (first && matchOver) {
+        showOverlay('FULL TIME', n.p1 + ' ' + score.USER + '–' + score.CPU + ' ' + n.p2);
+        overlayBtn.style.display = ''; overlayBtn.textContent = 'BACK TO LIST';
+    }
+}
+
+// Local clock tick so the timer keeps moving between updates.
+setInterval(() => {
+    if (mode !== 'SPECTATE' || matchOver || WT.setup || WT.first || overlay.style.display === 'flex') return;
+    clockMs = Math.max(0, clockMs - 250);
+    matchTimerEl.textContent = formatClock(clockMs);
+}, 250);
+
+// ---------- hook into the game ----------
+const _wtUpdateScoreboard = updateScoreboard;
+updateScoreboard = function () {
+    if (mode === 'SPECTATE') { scoreP1Display.textContent = score.USER; scoreP2Display.textContent = score.CPU; return; }
+    _wtUpdateScoreboard();
+};
+const _wtLeaveGame = leaveGame;
+leaveGame = function () { if (mode === 'SPECTATE') { wtLeave(); return; } return _wtLeaveGame(); };
+const _wtOverlayClick = handleOverlayClick;
+handleOverlayClick = function () {
+    if (mode === 'SPECTATE') { overlay.style.display = 'none'; if (matchOver) wtLeave(); return; }
+    return _wtOverlayClick();
+};
+
+// ---------- lobby card + help ----------
+(function () {
+    const anchor = document.getElementById('wc-card');
+    const html = '<button id="wt-card" class="mode-card" onclick="wtOpenList()"><span class="mode-ico">👁</span><span class="mode-txt"><b>WATCH MATCH</b><small>Watch live games as a spectator</small></span><span class="chev">›</span></button>';
+    if (anchor) anchor.insertAdjacentHTML('afterend', html); else document.querySelector('.modes').insertAdjacentHTML('afterbegin', html);
+    const ul = document.querySelector('.howto ul');
+    if (ul) ul.insertAdjacentHTML('beforeend', '<li><b>Watch Match:</b> open <b>WATCH MATCH</b> in the lobby to see every live game (player vs player, vs CPU and World Cup) and join as a spectator. Spectators can only watch.</li>');
+})();
+</script>
 </body>
 </html>
